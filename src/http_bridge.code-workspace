@@ -1,0 +1,32 @@
+{
+	"folders": [
+		{
+			"name": "http_bridge",
+			"path": ".."
+		}
+	],
+	"settings": {
+		"files.associations": {
+			"*.embeddedhtml": "html",
+			"array": "cpp",
+			"chrono": "cpp",
+			"deque": "cpp",
+			"format": "cpp",
+			"forward_list": "cpp",
+			"initializer_list": "cpp",
+			"list": "cpp",
+			"ranges": "cpp",
+			"regex": "cpp",
+			"span": "cpp",
+			"vector": "cpp",
+			"xhash": "cpp",
+			"xstring": "cpp",
+			"xtree": "cpp",
+			"xutility": "cpp",
+			"string": "cpp",
+			"unordered_map": "cpp",
+			"unordered_set": "cpp",
+			"string_view": "cpp"
+		}
+	}
+}

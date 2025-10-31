@@ -1,6 +1,6 @@
 # HTTPBridge ESP32
 
-HTTPBridge je firmware za ESP32 koji omogućava upravljanje sobnim kontrolerima (termostatima, rasvjetom, pinovima, relejima itd.) putem HTTP API-ja. Primarno se koristi za automatizaciju u hotelskim ili apartmanskim sistemima (npr. Toplik Resort), gdje je potrebno centralizovano i daljinsko upravljanje sobama.
+HTTPBridge je firmware za ESP32 koji omogućava upravljanje sobnim kontrolerima (termostatima, rasvjetom, pinovima, relejima itd.) putem HTTP API-ja. Primarno se koristi za automatizaciju u hotelskim ili apartmanskim sistemima, gdje je potrebno centralizovano i daljinsko upravljanje sobama.
 
 ## Funkcionalnosti
 

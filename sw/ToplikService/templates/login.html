@@ -8,49 +8,37 @@
     <title>Dobrodošli</title>
     
     <style>
-      /* --- Ovdje je "magija" za pozadinu --- */
+      /* --- (Stilovi ostaju isti) --- */
       body, html {
         height: 100%;
         margin: 0;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
       }
-      
       body {
-        /* VAŽNO: Ovdje zamijenite 'URL_VASE_SLIKE_RESORTA.jpg' 
-           s pravim linkom na vašu sliku.
-        */
         background-image: linear-gradient(rgba(0, 0, 0, 0.4), rgba(0, 0, 0, 0.4)), url('https://source.unsplash.com/random/1600x900/?resort,pool');
-        
-        /* Slika će prekriti cijeli ekran */
         background-position: center;
         background-repeat: no-repeat;
         background-size: cover;
-        
-        /* Centriranje login forme */
         display: grid;
         place-items: center;
       }
-      
-      /* Stil za samu formu */
       article {
         max-width: 380px;
         width: 100%;
         padding: 2rem;
         border-radius: 1rem;
-        background-color: rgba(255, 255, 255, 0.1); /* Blago prozirna pozadina */
-        backdrop-filter: blur(10px); /* Efekt zamućenja pozadine (moderno) */
+        background-color: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(10px);
         border: 1px solid rgba(255, 255, 255, 0.2);
       }
-      
       h1 {
         text-align: center;
         color: white;
       }
-      
       input[type="password"] {
         text-align: center;
         font-size: 1.5rem;
-        letter-spacing: 0.2em; /* Razmak između brojeva PIN-a */
+        letter-spacing: 0.2em;
       }
     </style>
   </head>
@@ -68,7 +56,9 @@
             name="pin" 
             placeholder="••••" 
             required
-            pattern="\d*"      inputmode="numeric" >
+            pattern="\d*"      
+            inputmode="numeric"
+            autocomplete="new-password" >
           
           <button type="submit" style="width: 100%;">Pristupi</button>
         </form>
@@ -80,6 +70,16 @@
       // --------------------------------------------------------
       // NOVI I KOMPLETAN JAVASCRIPT ZA LOGIN.HTML
       // --------------------------------------------------------
+
+      // AŽURIRANO 2: Osiguraj da je polje prazno kod učitavanja,
+      // bez obzira na cache browsera.
+      document.addEventListener('DOMContentLoaded', function() {
+        const pinInput = document.getElementById('pin');
+        if (pinInput) {
+          pinInput.value = ''; // Očisti polje
+        }
+      });
+
       document.getElementById('loginForma').addEventListener('submit', function(event) {
         event.preventDefault(); // Spriječi da stranica odradi "refresh"
         
@@ -100,36 +100,26 @@
           body: JSON.stringify({ pin: pin }), // Šaljemo JSON: {"pin": "VAŠ_PIN"}
         })
         .then(response => {
-            // Prvo provjeri da li je server uopće vratio OK (npr. 200)
-            // ili grešku (npr. 401 - Pogrešan PIN)
             if (response.ok) {
-                return response.json(); // Ako je OK, čitaj JSON
+                return response.json(); 
             } else {
-                // Ako je greška (npr. 401), generiraj grešku da je uhvati .catch()
-                // Pokušaj pročitati poruku o grešci od servera
                 return response.json().then(err => { 
                     throw new Error(err.message || 'Pogrešan PIN'); 
                 });
             }
         })
         .then(data => {
-            // Server je vratio { success: true }
             if (data.success) {
-                // Uspjeh! Preusmjeri na stranicu za kontrolu
                 window.location.href = '/soba';
             } else {
-                // Ovo se tehnički ne bi trebalo dogoditi zbog gornje logike
                 alert(data.message || 'Došlo je do greške.');
                 button.disabled = false;
                 button.textContent = originalButtonText;
             }
         })
         .catch(error => {
-            // Uhvati sve greške (pogrešan PIN, pad servera, mreža...)
             console.error('Greška pri prijavi:', error);
-            // Pokaži korisniku poruku o grešci koju je server poslao
             alert(error.message || 'Nije moguće provjeriti PIN.');
-            // Vrati dugme u normalno stanje
             button.disabled = false;
             button.textContent = originalButtonText;
         });

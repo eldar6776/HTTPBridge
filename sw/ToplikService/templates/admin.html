@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-    <title>Admin Dashboard (v2.4)</title>
+    <title>Admin Dashboard (v2.4.2)</title>
     <style>
         .container-fluid {
             display: grid;
@@ -236,7 +236,7 @@
         const pinForm = document.getElementById('pin-forma');
         const savePinBtn = document.getElementById('save-pin-btn');
         const pinPoruka = document.getElementById('pin-poruka');
-        const pinInput = document.getElementById('admin-new-pin'); // Input polje za PIN
+        const pinInput = document.getElementById('admin-new-pin');
 
 
         // --- 1. ODABIR SOBE U SIDEBARU ---
@@ -244,10 +244,9 @@
             link.addEventListener('click', function(e) {
                 e.preventDefault();
                 
-                // AŽURIRANO: Čitamo sve potrebne podatke
                 odabraniUredjaj = {
                     room_id: this.dataset.roomId,
-                    guest_pin: this.dataset.guestPin, // Čitamo trenutni PIN
+                    guest_pin: this.dataset.guestPin,
                     mdns: this.dataset.mdns,
                     port: this.dataset.port,
                     pin_controller_id: this.dataset.pinId,
@@ -266,7 +265,6 @@
                 adminForm.reset(); 
                 pinForm.reset();
 
-                // AŽURIRANO: Odmah popunjavamo polje za PIN
                 pinInput.value = odabraniUredjaj.guest_pin;
                 
                 document.querySelectorAll('.soba-link').forEach(l => l.classList.remove('active'));
@@ -486,7 +484,9 @@
             e.preventDefault();
             if (!odabraniUredjaj.room_id) return;
             
-            const newPin = pinInput.value;
+            // AŽURIRANO: Dohvati newPin OVDJE, tako da je dostupan u .then() bloku
+            const newPin = pinInput.value; 
+            
             if (!newPin || newPin.length < 4) {
                 postaviPoruku(pinPoruka, 'PIN mora imati barem 4 znaka.', 'error');
                 return;
@@ -506,14 +506,19 @@
             .then(handleAdminResponse)
             .then(data => {
                 postaviPoruku(pinPoruka, data.message, data.success ? 'success' : 'error');
+                
+                // OVDJE JE BILA GREŠKA
                 if (data.success) {
-                    // AŽURIRAJ UI U SIDEBARU
+                    // AŽURIRANO: 'newPin' je sada definiran u ovom scope-u
                     if (odabraniUredjaj.linkElement) {
-                        odabraniUredjaj.linkElement.querySelector('.soba-pin').textContent = newPin;
-                        // Ažuriraj i 'data' atribut za buduće klikove
+                        // Pronađi <span> unutar <a> linka i ažuriraj mu tekst
+                        const pinSpan = odabraniUredjaj.linkElement.querySelector('.soba-pin');
+                        if (pinSpan) {
+                            pinSpan.textContent = newPin;
+                        }
                         odabraniUredjaj.linkElement.dataset.guestPin = newPin; 
                     }
-                    odabraniUredjaj.guest_pin = newPin; // Ažuriraj stanje u memoriji
+                    odabraniUredjaj.guest_pin = newPin;
                 }
             })
             .catch(err => handleAdminError(err, pinPoruka, 'Greška pri promjeni PIN-a.'))

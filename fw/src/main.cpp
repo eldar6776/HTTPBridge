@@ -41,10 +41,10 @@ extern "C"
 #define MAX_PULSE_PINS 16
 #define HOLD_TIME 5000 // 5 sekundi WiFi reset putem dugmeta (BOOT dugme)
 
-String _ssid = "";
-String _pass = "";
-String _mdns = "";
-String _resp = "";
+char _ssid[64] = "";
+char _pass[64] = "";
+char _mdns[64] = "";
+char _resp[512] = "";
 String timerOnType = "OFF", timerOffType = "OFF";
 String timerOnTime = "0000", timerOffTime = "0000";
 
@@ -67,9 +67,9 @@ float th_setpoint = 25.0;   // Termostat varijable
 float th_treshold = 0.5;    // osnovni prag
 int currentFanLevel = 0;    // Globalna varijabla, čuva trenutno aktivnu brzinu: 0 = off, 1 = L, 2 = M, 3 = H
 uint8_t replyData[64] = {0};
-
+std::unique_ptr<AsyncWebServer> server;
 // Lista pinova koje već koristiš ili koji su hardverski rizični
-const int usedPins[] = {
+const int usedPins[] = { // NOLINT(cert-err58-cpp)
     BOOT_PIN,     // npr. GPIO0
     1,            // UART0 TX (Serial)
     LED_PIN,      // npr. GPIO2
@@ -130,9 +130,7 @@ SunSet sun;
 Ticker rtcSyncTicker;
 Preferences preferences;
 TinyFrame tfapp;
-AsyncWebServer *server = nullptr; // pokazivač umjesto direktnog objekta
-WiFiManager wm;
-
+WiFiManager wm; // NOLINT(cert-err58-cpp)
 const char *update_form_html = R"rawliteral(
 <!DOCTYPE html>
 <html>
@@ -883,17 +881,17 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
   case CMD_GET_SSID_PSWRD:
   {
     preferences.begin("wifi", false);
-    _ssid = preferences.getString("ssid", "");
-    _pass = preferences.getString("password", "");
+    preferences.getString("ssid", _ssid, sizeof(_ssid));
+    preferences.getString("password", _pass, sizeof(_pass));
     preferences.end();
 
-    if (_pass == "")
+    if (strlen(_pass) == 0)
     {
-      _resp = "SSID = " + _ssid + "\nPASSWORD = Not Set (OPEN NETWORK)";
+      snprintf(_resp, sizeof(_resp), "SSID = %s\nPASSWORD = Not Set (OPEN NETWORK)", _ssid);
     }
     else
     {
-      _resp = "SSID = " + _ssid + "\nPASSWORD = " + _pass;
+      snprintf(_resp, sizeof(_resp), "SSID = %s\nPASSWORD = %s", _ssid, _pass);
     }
     request->send(200, "text/plain", _resp);
     return;
@@ -905,8 +903,8 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
       request->send(400, "text/plain", "Missing SSID");
       return;
     }
-    _ssid = request->getParam("SSID")->value();
-    _pass = request->hasParam("PSWRD") ? request->getParam("PSWRD")->value() : "";
+    strlcpy(_ssid, request->getParam("SSID")->value().c_str(), sizeof(_ssid));
+    strlcpy(_pass, request->hasParam("PSWRD") ? request->getParam("PSWRD")->value().c_str() : "", sizeof(_pass));
 
     preferences.begin("wifi", false);
     preferences.putString("ssid", _ssid);
@@ -919,9 +917,9 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
   {
 
     preferences.begin("_mdns", false);
-    _mdns = preferences.getString("mdns", "");
+    preferences.getString("mdns", _mdns, sizeof(_mdns));
     preferences.end();
-    _resp = "mDNS = " + _mdns;
+    snprintf(_resp, sizeof(_resp), "mDNS = %s", _mdns);
     request->send(200, "text/plain", _resp);
     return;
   }
@@ -932,7 +930,7 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
       request->send(400, "text/plain", "Missing MDNS");
       return;
     }
-    _mdns = request->getParam("MDNS")->value();
+    strlcpy(_mdns, request->getParam("MDNS")->value().c_str(), sizeof(_mdns));
     preferences.begin("_mdns", false);
     preferences.putString("mdns", _mdns);
     preferences.end();
@@ -941,7 +939,7 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
   }
   case CMD_GET_IP_ADDRESS:
   {
-    _resp = "TCP/IP Address = " + WiFi.localIP().toString();
+    snprintf(_resp, sizeof(_resp), "TCP/IP Address = %s", WiFi.localIP().toString().c_str());
     request->send(200, "text/plain", _resp);
     return;
   }
@@ -950,7 +948,7 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
     preferences.begin("_port", false);
     _port = preferences.getInt("port", 0);
     preferences.end();
-    _resp = "TCP/IP Port = " + String(_port);
+    snprintf(_resp, sizeof(_resp), "TCP/IP Port = %d", _port);
     request->send(200, "text/plain", _resp);
     return;
   }
@@ -982,7 +980,7 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
       buf[2] = id & 0xFF;
 
       const char *pw = request->getParam("PASSWORD")->value().c_str();
-      strcpy((char *)buf + 3, pw);
+      strlcpy((char *)buf + 3, pw, sizeof(buf) - 3);
       length = 3 + strlen(pw) + 1;
     }
     break;
@@ -1167,11 +1165,15 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
     String on = request->hasParam("TIMERON") ? request->getParam("TIMERON")->value() : "";
     String off = request->hasParam("TIMEROFF") ? request->getParam("TIMEROFF")->value() : "";
 
-    String onType = "OFF", offType = "OFF", onTime = "0000", offTime = "0000";
-
+    String onType = "OFF";
+    String offType = "OFF";
+    String onTime = "0000";
+    String offTime = "0000";
+    int temp_hh, temp_mm;
+    
     if (on == "SUNSET" || on == "OFF")
       onType = on;
-    else if (on.length() == 4 && parseHHMM(on, *(new int), *(new int)))
+    else if (on.length() == 4 && parseHHMM(on, temp_hh, temp_mm))
     {
       onType = "MANUAL";
       onTime = on;
@@ -1184,7 +1186,7 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
 
     if (off == "SUNRISE" || off == "OFF")
       offType = off;
-    else if (off.length() == 4 && parseHHMM(off, *(new int), *(new int)))
+    else if (off.length() == 4 && parseHHMM(off, temp_hh, temp_mm))
     {
       offType = "MANUAL";
       offTime = off;
@@ -1359,8 +1361,8 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
     // Sastavi sve u jedan tekst
     String result;
     result += "WIFI SSID=" + ssidStr + "\n";
-    result += "WIFI PASSWORD=" + passStr + "\n";
-    result += "mDNS=" + _mdns + "\n";
+    result += "WIFI PASSWORD=" + String(passStr) + "\n";
+    result += "mDNS=" + String(_mdns) + "\n";
     result += "TCP/IP Port=" + String(_port) + "\n";
     result += "TCP/IP Address=" + ipStr + "\n";
     result += "Current Time (UTC)=: " + String(utcTimeStr) + "\n";
@@ -1400,7 +1402,9 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
   }
   case CMD_ESP_GET_PINS:
   {
-    _resp = getAvailablePinsStatus();
+    String pinsStatus = getAvailablePinsStatus();
+    strncpy(_resp, pinsStatus.c_str(), sizeof(_resp) - 1);
+    _resp[sizeof(_resp) - 1] = '\0'; // Ensure null termination
     request->send(200, "text/plain", _resp);
     break;
   }
@@ -1810,8 +1814,8 @@ void sendRtcToBus()
 void tryConnectWiFi()
 {
   preferences.begin("wifi", false);
-  String ssid = preferences.getString("ssid", "");
-  String password = preferences.getString("password", "");
+  preferences.getString("ssid", _ssid, sizeof(_ssid));
+  preferences.getString("password", _pass, sizeof(_pass));
   preferences.end();
 
   WiFiManager wm;
@@ -1819,19 +1823,19 @@ void tryConnectWiFi()
 
   bool connected = false;
 
-  if (ssid != "") // ako postoji SSID, pokušaj se spojiti
+  if (strlen(_ssid) > 0) // ako postoji SSID, pokušaj se spojiti
   {
-    if (password != "")
+    if (strlen(_pass) > 0)
     {
-      WiFi.begin(ssid.c_str(), password.c_str());
+      WiFi.begin(_ssid, _pass);
       Serial.print("🔌 Connecting on WiFi (with password): ");
-      Serial.println(ssid);
+      Serial.println(_ssid);
     }
     else
     {
-      WiFi.begin(ssid.c_str()); // pokušaj spojiti bez lozinke
-      Serial.print("🔌 Connecting on WiFi (no password): ");
-      Serial.println(ssid);
+      WiFi.begin(_ssid); // pokušaj spojiti bez lozinke
+      Serial.print("🔌 Connecting on WiFi (no password): "); // NOLINT(performance-avoid-endl)
+      Serial.println(_ssid);
     }
 
     unsigned long start = millis();
@@ -1918,7 +1922,8 @@ void setup()
   preferences.end();
 
   preferences.begin("_mdns", false);
-  _mdns = preferences.getString("mdns", "soba");
+  String mdns_str = preferences.getString("mdns", "soba");
+  strncpy(_mdns, mdns_str.c_str(), sizeof(_mdns) - 1);
   preferences.end();
 
   preferences.begin("_pingwdg", true); // true = read-only
@@ -1955,7 +1960,7 @@ void setup()
     Serial.println("\nFluid Temperature sensor NOT found!");
   }
 
-  server = new AsyncWebServer(_port); // Dinamička alokacija servera s portom iz Preferences
+  server = std::unique_ptr<AsyncWebServer>(new AsyncWebServer(_port)); // Dinamička alokacija servera s portom iz Preferences
 
   TF_InitStatic(&tfapp, TF_MASTER);
   rtcSyncTicker.attach(60.0, sendRtcToBus);

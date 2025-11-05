@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="hr" data-theme="dark">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <title>Admin Prijava</title>
+    <style>
+      main {
+        display: grid;
+        place-items: center;
+        min-height: 80vh;
+      }
+      article {
+        width: 100%;
+        max-width: 420px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h2 style="text-align: center;">Admin Prijava</h2>
+        <form id="loginForma">
+          <label for="password">Lozinka</label>
+          <input 
+            type="password" 
+            id="password" 
+            name="password" 
+            placeholder="Vaša admin lozinka" 
+            required
+          >
+          <button type="submit">Pristupi</button>
+        </form>
+        <div id="poruka" style="color: var(--pico-del-color); margin-top: 1rem;"></div>
+      </article>
+    </main>
+
+    <script>
+      document.getElementById('loginForma').addEventListener('submit', function(event) {
+        event.preventDefault();
+        const password = document.getElementById('password').value;
+        const porukaElement = document.getElementById('poruka');
+        const button = event.target.querySelector('button');
+
+        button.disabled = true;
+        porukaElement.textContent = '';
+
+        fetch('/api/admin/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: password }),
+        })
+        .then(response => response.json())
+        .then(data => {
+          if (data.success) {
+            // Uspjeh! Preusmjeri na admin dashboard
+            window.location.href = '/admin/dashboard';
+          } else {
+            porukaElement.textContent = data.message || 'Pogrešna lozinka.';
+            button.disabled = false;
+          }
+        })
+        .catch(error => {
+          console.error('Greška:', error);
+          porukaElement.textContent = 'Greška pri komunikaciji sa serverom.';
+          button.disabled = false;
+        });
+      });
+    </script>
+  </body>
+</html>

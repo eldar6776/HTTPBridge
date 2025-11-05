@@ -1,0 +1,58 @@
+API Uputstvo : Upravljanje PIN-ovima Soba
+Ovaj API služi da eksterni softver (npr. hotelski menadžment sistem) može sigurno postaviti ili obrisati PIN za pristup gosta sobi. 
+Logika Operacija
+Sistem je dizajniran da bude robustan i razdvaja fiksni ID sobe od promjenljivog PIN-a gosta.
+Postavljanje PIN-a (/api/external/sync_pin) 
+Slanje na Uređaj: Server pošalje SET_PASSWORD komandu (npr. G1,1234,...) na ESP32 uređaj da fizički postavi PIN. 
+Ažuriranje Servera: Ako je slanje uspješno, server ažurira config.json tako što postavi vrijednost polja guest_pin za tu sobu. 
+Brisanje PIN-a (/api/external/delete_pin)
+Slanje na Uređaj: Server pošalje SET_PASSWORD komandu sa parametrom G1X da fizički obriše PIN.
+Ažuriranje Servera: Ako je slanje uspješno, server postavi polje guest_pin na prazan string ("").
+
+1. Preduslovi (Podešavanje na Serveru)
+Prije korištenja ovog API-ja, morate osigurati tri stvari u vašem config.json fajlu:external_api_key: Na vrhu config.json fajla, morate definirati tajni API ključ. 5Hotelski softver mora slati ovaj ključ uz svaki zahtjev. 6JSON{
+  "admin_password": "...",
+  "external_api_key": "KLJUC-ZA-HOTELSKI-SOFTVER-98765", 
+  "sobe": { ... }
+}
+Fiksni room_id: Ključevi unutar "sobe" (npr. "301", "505") su sada fiksni identifikatori sobe i ne smiju se mijenjati.pin_controller i guest_pin: Za svaku sobu morate definirati: 7guest_pin: Polje koje čuva trenutni PIN.pin_controller: Koji RS485 uređaj (ID) prima komande za PIN. 8JSON"505": {
+  "ime": "Soba 505",
+  "guest_pin": "1234", 
+  "mdns": "soba505.local",
+  "port": "8020",
+  "uredjaji": {
+    "pin_controller": { "CMD": "SET_PASSWORD", "ID": "212" }, 
+    "light_main":     { "CMD": "SET_PIN", "ID": "212", "PIN": "1" }
+    // ... ostali uređaji
+  }
+}
+2. Detalji API Endpoint-aDostupna su dva endpointa:Ruta (Endpoint)MetodaOpis/api/external/sync_pinPOSTPostavlja ili mijenja PIN za određenu sobu./api/external/delete_pinPOSTBriše PIN za određenu sobu (postavlja ga na G1X).Format tijela za oba je application/json.3. Struktura ZahtjevaA) Postavljanje / Sinhronizacija PIN-aEndpoint: /api/external/sync_pinOpis: Koristi se prilikom "check-in" gosta za postavljanje novog PIN-a.JSON Zahtjev (Body):KljučTipOpisapi_keystringVaš tajni external_api_key iz config.json. [cite: 7]room_idstringFiksni ID sobe koju mijenjate (npr. "505").new_pinstringNovi PIN koji želite postaviti za gosta (npr. "9988"). [cite: 7]Primjer cURL Zahtjeva:Bashcurl -X POST http://127.0.0.1:5000/api/external/sync_pin -H "Content-Type: application/json" -d "{\"api_key\": \"KLJUC-ZA-HOTELSKI-SOFTVER-98765\", \"room_id\": \"505\", \"new_pin\": \"9988\"}"
+B) Brisanje PIN-aEndpoint: /api/external/delete_pinOpis: Koristi se prilikom "check-out" gosta za brisanje PIN-a.JSON Zahtjev (Body):KljučTipOpisapi_keystringVaš tajni external_api_key iz config.json.room_idstringFiksni ID sobe čiji PIN brišete (npr. "505").Primjer cURL Zahtjeva:Bashcurl -X POST http://127.0.0.1:5000/api/external/delete_pin -H "Content-Type: application/json" -d "{\"api_key\": \"KLJUC-ZA-HOTELSKI-SOFTVER-98765\", \"room_id\": \"505\"}"
+4. Mogući Odgovori (Responses)✅ Uspješan Odgovor (HTTP 200 OK)Za sync_pin:JSON{
+  "success": true,
+  "message": "PIN sobe 505 uspješno sinkroniziran na 9988 (Uređaj & Server)."
+}
+Za delete_pin:JSON{
+  "success": true,
+  "message": "PIN za sobu 505 uspješno obrisan."
+}
+❌ Greška: Pogrešan API Ključ (HTTP 401 Unauthorized)Ako api_key nije ispravan: 9JSON{
+  "success": false,
+  "message": "Neispravan eksterni API ključ."
+}
+❌ Greška: Loš Zahtjev (HTTP 400 Bad Request)Ako niste poslali room_id ili new_pin, ili ako room_id ne postoji: 10JSON{
+  "success": false,
+  "message": "Nedostaje room_id, new_pin ili room_id nije pronađen."
+}
+❌ Greška: Greška na Serveru ili Uređaju (HTTP 500 Internal Server Error)Ovo se dešava ako server ne uspije komunicirati sa ESP32 uređajem. 11Slučaj 1: ESP32 nije odgovorio (npr. offline je): 12JSON{
+  "success": false,
+  "message": "Greška: ESP32 nije prihvatio PIN. (Greška: Konekcija na uređaj nije uspjela...)"
+}
+Slučaj 2: (KRITIČAN) ESP je prihvatio PIN, ali server nije uspio spremiti config.json: 13JSON{
+  "success": false,
+  "message": "PIN je promijenjen na uređaju, ali ne i na serveru (greška pri upisu)!"
+}
+
+
+curl -X POST http://127.0.0.1:5000/api/external/sync_pin -H "Content-Type: application/json" -d "{\"api_key\": \"KLJUC-ZA-HOTELSKI-SOFTVER-98765\", \"room_id\": \"505\", \"new_pin\": \"9988\"}"
+curl -X POST http://127.0.0.1:5000/api/external/delete_pin -H "Content-Type: application/json" -d "{\"api_key\": \"KLJUC-ZA-HOTELSKI-SOFTVER-98765\", \"room_id\": \"505\"}"

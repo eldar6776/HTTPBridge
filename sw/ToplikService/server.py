@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------
-#  TOPLIK SERVICE - PYTHON BACKEND SERVER (FAZA 6.1: Očuvan format JSON-a)
+#  TOPLIK SERVICE - PYTHON BACKEND SERVER (FAZA 6.3: Admin PIN Change)
 # ----------------------------------------------------------------------
 import os
 import json
@@ -12,7 +12,7 @@ import re
 import threading
 import time
 import logging
-from collections import OrderedDict # <-- NOVO: Uvozimo da sačuvamo redoslijed
+from collections import OrderedDict
 
 # --- INICIJALIZACIJA APLIKACIJE ---
 app = Flask(__name__)
@@ -34,13 +34,7 @@ def load_config():
     global CONFIG
     try:
         with open('config.json', 'r', encoding='utf-8') as f:
-            
-            # --- AŽURIRANO OVDJE ---
-            # Koristimo 'object_pairs_hook=OrderedDict' da bi
-            # Python sačuvao tačan redoslijed ključeva iz fajla.
             original_config = json.load(f, object_pairs_hook=OrderedDict)
-            # --- KRAJ AŽURIRANJA ---
-
             for soba_id, soba_data in original_config.get('sobe', {}).items():
                 soba_data['cached_ip'] = None
             
@@ -57,7 +51,6 @@ def save_config():
         try:
             config_to_save = CONFIG.copy()
             with open('config.json', 'w', encoding='utf-8') as f:
-                # json.dump automatski poštuje redoslijed iz OrderedDict
                 json.dump(config_to_save, f, indent=2, ensure_ascii=False)
             logging.info("CONFIG: Uspješno spremljen config.json.")
             return True
@@ -238,7 +231,7 @@ def soba_page():
 @app.route('/api/login', methods=['POST'])
 def api_login():
     data = request.json
-    pin = data.get('pin')
+    pin = data.get('pin') 
     if not pin:
         return jsonify({'success': False, 'message': 'PIN nije poslan'}), 400
     
@@ -247,7 +240,8 @@ def api_login():
             for soba_id, soba_data in CONFIG.get('sobe', {}).items():
                 if soba_data.get('guest_pin') == pin:
                     token_payload = {
-                        'soba_id': soba_id,
+                        'soba_id': soba_id, 
+                        'guest_pin': pin, # Spremi PIN u token
                         'mdns': soba_data['mdns'],
                         'port': soba_data['port'],
                         'tip': 'gost',
@@ -276,12 +270,25 @@ def api_control():
         if soba_data.get('tip') != 'gost':
              return jsonify({'success': False, 'message': 'Neispravan token'}), 401
         
-        data = request.json
-        uredjaj = data.get('uredjaj'); vrijednost = data.get('vrijednost'); soba_id = soba_data.get('soba_id')
+        # --- SIGURNOSNI BLOK (Faza 6.2) ---
+        soba_id = soba_data.get('soba_id')
+        pin_iz_tokena = soba_data.get('guest_pin')
+        if not pin_iz_tokena:
+            return jsonify({'success': False, 'message': 'Neispravan token (nedostaje pin). Prijavite se ponovo.'}), 401
 
         with config_lock:
             if not soba_id or soba_id not in CONFIG['sobe']:
-                return jsonify({'success': False, 'message': 'Konfiguracija sobe nije pronađena'}), 500
+                return jsonify({'success': False, 'message': 'Konfiguracija sobe nije pronađena.'}), 500
+            trenutni_guest_pin = CONFIG['sobe'][soba_id].get('guest_pin')
+            if trenutni_guest_pin != pin_iz_tokena:
+                logging.warning(f"ODBIJENO: Token za sobu {soba_id} je nevažeći (PIN promijenjen). Korisnik izbačen.")
+                return jsonify({'success': False, 'message': 'PIN za sobu je promijenjen. Molimo prijavite se ponovo.'}), 401
+        # --- KRAJ SIGURNOSNOG BLOKA ---
+
+        data = request.json
+        uredjaj = data.get('uredjaj'); vrijednost = data.get('vrijednost')
+
+        with config_lock:
             soba_config = CONFIG['sobe'][soba_id]
             if not uredjaj or uredjaj not in soba_config.get('uredjaji', {}):
                 return jsonify({'success': False, 'message': f'Uređaj "{uredjaj}" nije definiran'}), 400
@@ -324,6 +331,7 @@ def provjeri_admin_token(token):
 def admin_login_page():
     return render_template('admin_login.html')
 
+# AŽURIRANO: /admin/dashboard (Ispravno šalje 'guest_pin')
 @app.route('/admin/dashboard')
 def admin_dashboard():
     if not provjeri_admin_token(request.cookies.get('admin_token')):
@@ -331,13 +339,14 @@ def admin_dashboard():
     
     with config_lock:
         sobe_za_admina = {}
-        for soba_id, data in CONFIG.get('sobe', {}).items():
+        # AŽURIRANO: Ključ je 'soba_id' (fiksni) a ne 'pin'
+        for soba_id, data in CONFIG.get('sobe', {}).items(): 
             uredjaji = data.get('uredjaji', {})
-            sobe_za_admina[soba_id] = {
+            sobe_za_admina[soba_id] = { # Koristi fiksni soba_id kao ključ
                 "ime": data.get('ime'),
                 "mdns": data.get('mdns'),
                 "port": data.get('port'),
-                "guest_pin": data.get('guest_pin', 'N/A'),
+                "guest_pin": data.get('guest_pin', 'N/A'), # Šaljemo stvarni PIN
                 "termostat_id": uredjaji.get('termostat_set', {}).get('ID', 'N/A'),
                 "pin_controller_id": uredjaji.get('pin_controller', {}).get('ID', 'N/A')
             }
@@ -478,9 +487,19 @@ def api_get_guest_status():
              return jsonify({'success': False, 'message': 'Neispravan token'}), 401
 
         soba_id = soba_data.get('soba_id')
+        pin_iz_tokena = soba_data.get('guest_pin')
+        if not pin_iz_tokena:
+            return jsonify({'success': False, 'message': 'Neispravan token (nedostaje pin). Prijavite se ponovo.'}), 401
+
         with config_lock:
             if not soba_id or soba_id not in CONFIG['sobe']:
-                return jsonify({'success': False, 'message': 'Konfiguracija sobe nije pronađena'}), 500
+                return jsonify({'success': False, 'message': 'Konfiguracija sobe nije pronađena.'}), 500
+            trenutni_guest_pin = CONFIG['sobe'][soba_id].get('guest_pin')
+            if trenutni_guest_pin != pin_iz_tokena:
+                logging.warning(f"ODBIJENO (STATUS): Token za sobu {soba_id} je nevažeći (PIN promijenjen). Korisnik izbačen.")
+                return jsonify({'success': False, 'message': 'PIN za sobu je promijenjen. Molimo prijavite se ponovo.'}), 401
+        
+        with config_lock:
             soba_config = CONFIG['sobe'][soba_id]
             termostat_id = soba_config.get('uredjaji', {}).get('termostat_set', {}).get('ID')
         
@@ -704,6 +723,31 @@ def api_admin_esp_pin_control():
         return jsonify({'success': False, 'message': message})
 
 # ----------------------------------------------------------------------
+#  NOVO: API RUTA ZA PROMJENU PINA (ADMIN)
+# ----------------------------------------------------------------------
+@app.route('/api/admin/change_pin', methods=['POST'])
+def api_admin_change_pin():
+    """API za promjenu PIN-a pozvan iz Admin Dashboarda."""
+    if not provjeri_admin_token(request.cookies.get('admin_token')):
+        return jsonify({'success': False, 'message': 'Niste prijavljeni (neispravan token).'}), 401
+    
+    data = request.json
+    room_id = data.get('room_id')
+    new_pin = data.get('new_pin')
+
+    if not all([room_id, new_pin]):
+        return jsonify({'success': False, 'message': 'Nedostaje ID sobe ili novi PIN.'}), 400
+
+    # Koristimo istu centralnu logiku kao i eksterni API
+    logging.info(f"ADMIN PIN CHANGE: Admin mijenja PIN za sobu {room_id} na {new_pin}")
+    success, message = sync_pin_on_server_and_device(room_id, new_pin)
+
+    if success:
+        return jsonify({'success': True, 'message': message})
+    else:
+        return jsonify({'success': False, 'message': message}), 500
+        
+# ----------------------------------------------------------------------
 #  POZADINSKI PROCES ZA AŽURIRANJE IP ADRESA
 # ----------------------------------------------------------------------
 def background_resolver_task():
@@ -747,7 +791,7 @@ if __name__ == '__main__':
     resolver_thread = threading.Thread(target=background_resolver_task, daemon=True)
     resolver_thread.start()
 
-    print("--- Pokrećem Toplik Service (PRODUKCIJA Faza 6.1) ---")
+    print("--- Pokrećem Toplik Service (PRODUKCIJA Faza 6.3) ---")
     print("--- Server radi na http://0.0.0.0:5000 ---")
     print("--- Pritisnite CTRL+C za zaustavljanje ---")
     

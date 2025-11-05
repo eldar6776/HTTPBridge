@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-    <title>Admin Dashboard (v2.1)</title>
+    <title>Admin Dashboard (v2.4)</title>
     <style>
         .container-fluid {
             display: grid;
@@ -56,16 +56,18 @@
         <aside>
             <h4>Toplik Service</h4>
             <nav>
-                <ul>
+                <ul id="sidebar-list">
                     {% for pin, soba in sobe.items() %}
                     <li>
                         <a href="#" 
                            class="soba-link"
+                           data-room-id="{{ pin }}" 
+                           data-guest-pin="{{ soba.guest_pin }}" 
                            data-mdns="{{ soba.mdns }}"
                            data-port="{{ soba.port }}"
                            data-pin-id="{{ soba.pin_controller_id }}"
                            data-th-id="{{ soba.termostat_id }}">
-                           {{ soba.ime }} (PIN: {{ pin }})
+                           <span class="soba-ime">{{ soba.ime }}</span>
                         </a>
                     </li>
                     {% endfor %}
@@ -137,13 +139,14 @@
                         <label for="admin-mode">
                             Mod Rada (Podešavanje)
                             <select id="admin-mode" name="mode">
+                                <option value="ON">Uključi (Zadnji Mod)</option>
                                 <option value="HEATING">Grijanje (HEATING)</option>
                                 <option value="COOLING">Hlađenje (COOLING)</option>
-								<option value="ON">Uključeno (PRETHODNO)</option>
                                 <option value="OFF">Isključeno (OFF)</option>
                             </select>
                         </label>
-                        </div>
+                        
+                    </div>
                     <div class="grid">
                         <label>
                             Diferenca (Diff)
@@ -194,11 +197,32 @@
                 </div>
 
             </article>
+
+            <article id="pin-change-article" style="display: none; margin-top: 1.5rem;">
+                <h4>Upravljanje PIN-om Sobe</h4>
+                <form id="pin-forma">
+                    <div class="grid">
+                        <label for="admin-new-pin">
+                            Trenutni / Novi PIN Gosta
+                            <input type="text" id="admin-new-pin" name="new_pin" required>
+                        </label>
+                        <label style="display: flex; align-items: flex-end;">
+                            <button type="submit" id="save-pin-btn" aria-busy="false">
+                                <i class="bi bi-key-fill"></i> Postavi Novi PIN
+                            </button>
+                        </label>
+                    </div>
+                </form>
+                <div id="pin-poruka" style="margin-top: 1rem;"></div>
+            </article>
+
         </main>
     </div>
 
     <script>
-        let odabraniUredjaj = {};
+        let odabraniUredjaj = {
+            linkElement: null
+        };
         const getStatusBtn = document.getElementById('get-status-btn');
         const saveSettingsBtn = document.getElementById('save-settings-btn');
         const adminForm = document.getElementById('admin-forma');
@@ -208,23 +232,42 @@
         const syncTimeBtn = document.getElementById('sync-time-btn');
         const espPinsContainer = document.getElementById('esp-pins-container');
 
+        const pinChangeArticle = document.getElementById('pin-change-article');
+        const pinForm = document.getElementById('pin-forma');
+        const savePinBtn = document.getElementById('save-pin-btn');
+        const pinPoruka = document.getElementById('pin-poruka');
+        const pinInput = document.getElementById('admin-new-pin'); // Input polje za PIN
+
+
         // --- 1. ODABIR SOBE U SIDEBARU ---
         document.querySelectorAll('.soba-link').forEach(link => {
             link.addEventListener('click', function(e) {
                 e.preventDefault();
+                
+                // AŽURIRANO: Čitamo sve potrebne podatke
                 odabraniUredjaj = {
+                    room_id: this.dataset.roomId,
+                    guest_pin: this.dataset.guestPin, // Čitamo trenutni PIN
                     mdns: this.dataset.mdns,
                     port: this.dataset.port,
                     pin_controller_id: this.dataset.pinId,
                     termostat_id: this.dataset.thId,
-                    ime: this.textContent.trim()
+                    ime: this.querySelector('.soba-ime').textContent,
+                    linkElement: this
                 };
 
                 document.getElementById('upute').style.display = 'none';
                 document.getElementById('soba-kontrole').style.display = 'block';
+                pinChangeArticle.style.display = 'block';
+                
                 document.getElementById('odabrana-soba-ime').textContent = odabraniUredjaj.ime;
                 adminPoruka.textContent = '';
+                pinPoruka.textContent = '';
                 adminForm.reset(); 
+                pinForm.reset();
+
+                // AŽURIRANO: Odmah popunjavamo polje za PIN
+                pinInput.value = odabraniUredjaj.guest_pin;
                 
                 document.querySelectorAll('.soba-link').forEach(l => l.classList.remove('active'));
                 this.classList.add('active');
@@ -239,7 +282,7 @@
         function dohvatiStatus() {
             if (!odabraniUredjaj.mdns) return;
 
-            postaviPoruku('Dohvaćam status...', 'normal');
+            postaviPoruku(adminPoruka, 'Dohvaćam status...', 'normal');
             setDugmadBusy(true, [getStatusBtn]);
 
             fetch('/api/admin/get_status', {
@@ -250,14 +293,14 @@
             .then(handleAdminResponse)
             .then(data => {
                 if (data.success) {
-                    postaviPoruku('Status uspješno učitan.', 'success');
+                    postaviPoruku(adminPoruka, 'Status uspješno učitan.', 'success');
                     popuniFormu(data.status);
                     popuniPinove(data.status.pins);
                 } else {
-                    postaviPoruku('Greška: ' + data.message, 'error');
+                    postaviPoruku(adminPoruka, 'Greška: ' + data.message, 'error');
                 }
             })
-            .catch(err => handleAdminError(err, 'Greška pri dohvaćanju statusa.'))
+            .catch(err => handleAdminError(err, adminPoruka, 'Greška pri dohvaćanju statusa.'))
             .finally(() => {
                 setDugmadBusy(false, [getStatusBtn]);
             });
@@ -273,10 +316,7 @@
             
             document.getElementById('admin-setpoint').value = status.setpoint || '';
             document.getElementById('admin-temp').value = status.temp || ''; 
-            
-            // AŽURIRANO: Postavi odabranu vrijednost u padajućem meniju
             document.getElementById('admin-mode').value = (status.mode || 'OFF').toUpperCase();
-            
             document.getElementById('admin-diff').value = status.diff || '';
             document.getElementById('admin-ema_filter').value = status.ema_filter || '';
             document.getElementById('admin-fan').value = status.fan || '';
@@ -318,7 +358,7 @@
                 const pin = e.target.dataset.pin;
                 const state = e.target.checked;
                 
-                postaviPoruku(`Šaljem komandu za GPIO${pin}...`, 'normal');
+                postaviPoruku(adminPoruka, `Šaljem komandu za GPIO${pin}...`, 'normal');
                 e.target.disabled = true;
 
                 fetch('/api/admin/esp_pin_control', {
@@ -333,13 +373,13 @@
                 .then(handleAdminResponse)
                 .then(data => {
                     if (data.success) {
-                        postaviPoruku(`GPIO${pin} je postavljen na ${state ? 'HIGH' : 'LOW'}.`, 'success');
+                        postaviPoruku(adminPoruka, `GPIO${pin} je postavljen na ${state ? 'HIGH' : 'LOW'}.`, 'success');
                     } else {
-                        postaviPoruku('Greška: ' + data.message, 'error');
+                        postaviPoruku(adminPoruka, 'Greška: ' + data.message, 'error');
                         e.target.checked = !state;
                     }
                 })
-                .catch(err => handleAdminError(err, 'Greška pri slanju komande za pin.'))
+                .catch(err => handleAdminError(err, adminPoruka, 'Greška pri slanju komande za pin.'))
                 .finally(() => {
                     e.target.disabled = false;
                 });
@@ -351,7 +391,7 @@
             e.preventDefault();
             if (!odabraniUredjaj.mdns) return;
 
-            postaviPoruku('Šaljem postavke...', 'normal');
+            postaviPoruku(adminPoruka, 'Šaljem postavke...', 'normal');
             setDugmadBusy(true, [saveSettingsBtn]);
             
             const formData = new FormData(adminForm);
@@ -373,10 +413,10 @@
             })
             .then(handleAdminResponse)
             .then(data => {
-                postaviPoruku(data.message || 'Gotovo.', data.success ? 'success' : 'error');
+                postaviPoruku(adminPoruka, data.message || 'Gotovo.', data.success ? 'success' : 'error');
                 dohvatiStatus(); 
             })
-            .catch(err => handleAdminError(err, 'Greška pri spremanju postavki.'))
+            .catch(err => handleAdminError(err, adminPoruka, 'Greška pri spremanju postavki.'))
             .finally(() => {
                 setDugmadBusy(false, [saveSettingsBtn]);
             });
@@ -388,7 +428,7 @@
                 return;
             }
             
-            postaviPoruku('Šaljem komandu za restart...', 'normal');
+            postaviPoruku(adminPoruka, 'Šaljem komandu za restart...', 'normal');
             setDugmadBusy(true, [restartBtn]);
 
             fetch('/api/admin/restart_esp', {
@@ -398,12 +438,13 @@
             })
             .then(handleAdminResponse)
             .then(data => {
-                postaviPoruku(data.message, data.success ? 'success' : 'error');
                 if (data.success) {
-                    postaviPoruku('Uređaj se restartuje. Pričekajte 30 sekundi prije osvježavanja statusa.', 'success');
+                    postaviPoruku(adminPoruka, 'Uređaj se restartuje. Pričekajte 30 sekundi prije osvježavanja statusa.', 'success');
+                } else {
+                    postaviPoruku(adminPoruka, data.message, 'error');
                 }
             })
-            .catch(err => handleAdminError(err, 'Greška pri slanju restarta.'))
+            .catch(err => handleAdminError(err, adminPoruka, 'Greška pri slanju restarta.'))
             .finally(() => {
                 setDugmadBusy(false, [restartBtn]);
             });
@@ -418,7 +459,7 @@
             const dateStr = pad(now.getDate()) + pad(now.getMonth() + 1) + pad(now.getFullYear() % 100); // DDMMYY
             const timeStr = pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds()); // HHMMSS
             
-            postaviPoruku(`Šaljem lokalno vrijeme (${dateStr} ${timeStr})...`, 'normal');
+            postaviPoruku(adminPoruka, `Šaljem lokalno vrijeme (${dateStr} ${timeStr})...`, 'normal');
             setDugmadBusy(true, [syncTimeBtn]);
 
             fetch('/api/admin/set_esp_time', {
@@ -432,31 +473,73 @@
             })
             .then(handleAdminResponse)
             .then(data => {
-                postaviPoruku(data.message, data.success ? 'success' : 'error');
+                postaviPoruku(adminPoruka, data.message, data.success ? 'success' : 'error');
             })
-            .catch(err => handleAdminError(err, 'Greška pri sinhronizaciji vremena.'))
+            .catch(err => handleAdminError(err, adminPoruka, 'Greška pri sinhronizaciji vremena.'))
             .finally(() => {
                 setDugmadBusy(false, [syncTimeBtn]);
             });
         });
 
-        // --- 7. Helper Funkcije za UI ---
+        // --- 7. PROMJENA PINA (ADMIN) ---
+        pinForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            if (!odabraniUredjaj.room_id) return;
+            
+            const newPin = pinInput.value;
+            if (!newPin || newPin.length < 4) {
+                postaviPoruku(pinPoruka, 'PIN mora imati barem 4 znaka.', 'error');
+                return;
+            }
+
+            postaviPoruku(pinPoruka, `Mijenjam PIN sobe ${odabraniUredjaj.ime} na ${newPin}...`, 'normal');
+            setDugmadBusy(true, [savePinBtn]);
+
+            fetch('/api/admin/change_pin', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    room_id: odabraniUredjaj.room_id,
+                    new_pin: newPin
+                })
+            })
+            .then(handleAdminResponse)
+            .then(data => {
+                postaviPoruku(pinPoruka, data.message, data.success ? 'success' : 'error');
+                if (data.success) {
+                    // AŽURIRAJ UI U SIDEBARU
+                    if (odabraniUredjaj.linkElement) {
+                        odabraniUredjaj.linkElement.querySelector('.soba-pin').textContent = newPin;
+                        // Ažuriraj i 'data' atribut za buduće klikove
+                        odabraniUredjaj.linkElement.dataset.guestPin = newPin; 
+                    }
+                    odabraniUredjaj.guest_pin = newPin; // Ažuriraj stanje u memoriji
+                }
+            })
+            .catch(err => handleAdminError(err, pinPoruka, 'Greška pri promjeni PIN-a.'))
+            .finally(() => {
+                setDugmadBusy(false, [savePinBtn]);
+            });
+        });
+
+
+        // --- 8. Helper Funkcije za UI ---
         function setDugmadBusy(isBusy, buttons) {
             buttons.forEach(btn => btn.setAttribute('aria-busy', isBusy ? 'true' : 'false'));
         }
-        function postaviPoruku(poruka, tip) {
-            adminPoruka.textContent = poruka;
-            adminPoruka.style.color = (tip === 'error') ? 'var(--pico-del-color)' : 
-                                      (tip === 'success') ? 'var(--pico-confirmation-color)' : 
-                                      'var(--pico-secondary)';
+        function postaviPoruku(element, poruka, tip) {
+            element.textContent = poruka;
+            element.style.color = (tip === 'error') ? 'var(--pico-del-color)' : 
+                                  (tip === 'success') ? 'var(--pico-confirmation-color)' : 
+                                  'var(--pico-secondary)';
         }
         function handleAdminResponse(response) {
             if (response.status === 401) { window.location.href = '/admin'; }
             return response.json();
         }
-        function handleAdminError(err, poruka) {
+        function handleAdminError(err, element, poruka) {
             console.error(err);
-            postaviPoruku(poruka || 'Greška u komunikaciji sa serverom.', 'error');
+            postaviPoruku(element, poruka || 'Greška u komunikaciji sa serverom.', 'error');
         }
 
     </script>

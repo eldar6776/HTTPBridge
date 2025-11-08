@@ -12,7 +12,7 @@
           "CMD": "SET_PASSWORD",
           "ID": "200"
         },
-        "light_main": {
+        "light_luster": {
           "CMD": "SET_PIN",
           "ID": "200",
           "PIN": "1"
@@ -22,39 +22,23 @@
           "ID": "200",
           "PIN": "2"
         },
-        "light_wc": {
+        "light_krevet": {
           "CMD": "SET_PIN",
           "ID": "200",
           "PIN": "3"
         },
-        "light_desk": {
+        "light_wc": {
           "CMD": "SET_PIN",
           "ID": "200",
           "PIN": "5"
         },
-        "light_balcony": {
+        "light_ogledalo": {
           "CMD": "SET_PIN",
           "ID": "200",
           "PIN": "6"
         },
         "termostat_set": {
           "CMD": "SET_ROOM_TEMP",
-          "ID": "92"
-        },
-        "termostat_on": {
-          "CMD": "SET_THST_ON",
-          "ID": "92"
-        },
-        "termostat_off": {
-          "CMD": "SET_THST_OFF",
-          "ID": "92"
-        },
-        "termostat_heating": {
-          "CMD": "SET_THST_HEATING",
-          "ID": "92"
-        },
-        "termostat_cooling": {
-          "CMD": "SET_THST_COOLING",
           "ID": "92"
         }
       },
@@ -70,7 +54,7 @@
           "CMD": "SET_PASSWORD",
           "ID": "201"
         },
-        "light_main": {
+        "light_luster": {
           "CMD": "SET_PIN",
           "ID": "201",
           "PIN": "1"
@@ -80,39 +64,23 @@
           "ID": "201",
           "PIN": "2"
         },
-        "light_wc": {
+        "light_krevet": {
           "CMD": "SET_PIN",
           "ID": "201",
           "PIN": "3"
         },
-        "light_desk": {
+        "light_wc": {
           "CMD": "SET_PIN",
           "ID": "201",
           "PIN": "5"
         },
-        "light_balcony": {
+        "light_ogledalo": {
           "CMD": "SET_PIN",
           "ID": "201",
           "PIN": "6"
         },
         "termostat_set": {
           "CMD": "SET_ROOM_TEMP",
-          "ID": "93"
-        },
-        "termostat_on": {
-          "CMD": "SET_THST_ON",
-          "ID": "93"
-        },
-        "termostat_off": {
-          "CMD": "SET_THST_OFF",
-          "ID": "93"
-        },
-        "termostat_heating": {
-          "CMD": "SET_THST_HEATING",
-          "ID": "93"
-        },
-        "termostat_cooling": {
-          "CMD": "SET_THST_COOLING",
           "ID": "93"
         }
       },
@@ -128,7 +96,7 @@
           "CMD": "SET_PASSWORD",
           "ID": "202"
         },
-        "light_main": {
+        "light_luster": {
           "CMD": "SET_PIN",
           "ID": "202",
           "PIN": "1"
@@ -138,39 +106,23 @@
           "ID": "202",
           "PIN": "2"
         },
-        "light_wc": {
+        "light_krevet": {
           "CMD": "SET_PIN",
           "ID": "202",
           "PIN": "3"
         },
-        "light_desk": {
+        "light_wc": {
           "CMD": "SET_PIN",
           "ID": "202",
           "PIN": "5"
         },
-        "light_balcony": {
+        "light_ogledalo": {
           "CMD": "SET_PIN",
           "ID": "202",
           "PIN": "6"
         },
         "termostat_set": {
           "CMD": "SET_ROOM_TEMP",
-          "ID": "94"
-        },
-        "termostat_on": {
-          "CMD": "SET_THST_ON",
-          "ID": "94"
-        },
-        "termostat_off": {
-          "CMD": "SET_THST_OFF",
-          "ID": "94"
-        },
-        "termostat_heating": {
-          "CMD": "SET_THST_HEATING",
-          "ID": "94"
-        },
-        "termostat_cooling": {
-          "CMD": "SET_THST_COOLING",
           "ID": "94"
         }
       },
@@ -186,7 +138,7 @@
           "CMD": "SET_PASSWORD",
           "ID": "203"
         },
-        "light_main": {
+        "light_luster": {
           "CMD": "SET_PIN",
           "ID": "203",
           "PIN": "1"
@@ -196,39 +148,23 @@
           "ID": "203",
           "PIN": "2"
         },
-        "light_wc": {
+        "light_krevet": {
           "CMD": "SET_PIN",
           "ID": "203",
           "PIN": "3"
         },
-        "light_desk": {
+        "light_wc": {
           "CMD": "SET_PIN",
           "ID": "203",
           "PIN": "5"
         },
-        "light_balcony": {
+        "light_ogledalo": {
           "CMD": "SET_PIN",
           "ID": "203",
           "PIN": "6"
         },
         "termostat_set": {
           "CMD": "SET_ROOM_TEMP",
-          "ID": "95"
-        },
-        "termostat_on": {
-          "CMD": "SET_THST_ON",
-          "ID": "95"
-        },
-        "termostat_off": {
-          "CMD": "SET_THST_OFF",
-          "ID": "95"
-        },
-        "termostat_heating": {
-          "CMD": "SET_THST_HEATING",
-          "ID": "95"
-        },
-        "termostat_cooling": {
-          "CMD": "SET_THST_COOLING",
           "ID": "95"
         }
       },
@@ -244,7 +180,7 @@
           "CMD": "SET_PASSWORD",
           "ID": "204"
         },
-        "light_main": {
+        "light_luster": {
           "CMD": "SET_PIN",
           "ID": "204",
           "PIN": "1"
@@ -254,39 +190,23 @@
           "ID": "204",
           "PIN": "2"
         },
-        "light_wc": {
+        "light_krevet": {
           "CMD": "SET_PIN",
           "ID": "204",
           "PIN": "3"
         },
-        "light_desk": {
+        "light_wc": {
           "CMD": "SET_PIN",
           "ID": "204",
           "PIN": "5"
         },
-        "light_balcony": {
+        "light_ogledalo": {
           "CMD": "SET_PIN",
           "ID": "204",
           "PIN": "6"
         },
         "termostat_set": {
           "CMD": "SET_ROOM_TEMP",
-          "ID": "96"
-        },
-        "termostat_on": {
-          "CMD": "SET_THST_ON",
-          "ID": "96"
-        },
-        "termostat_off": {
-          "CMD": "SET_THST_OFF",
-          "ID": "96"
-        },
-        "termostat_heating": {
-          "CMD": "SET_THST_HEATING",
-          "ID": "96"
-        },
-        "termostat_cooling": {
-          "CMD": "SET_THST_COOLING",
           "ID": "96"
         }
       },
@@ -302,7 +222,7 @@
           "CMD": "SET_PASSWORD",
           "ID": "205"
         },
-        "light_main": {
+        "light_luster": {
           "CMD": "SET_PIN",
           "ID": "205",
           "PIN": "1"
@@ -312,39 +232,23 @@
           "ID": "205",
           "PIN": "2"
         },
-        "light_wc": {
+        "light_krevet": {
           "CMD": "SET_PIN",
           "ID": "205",
           "PIN": "3"
         },
-        "light_desk": {
+        "light_wc": {
           "CMD": "SET_PIN",
           "ID": "205",
           "PIN": "5"
         },
-        "light_balcony": {
+        "light_ogledalo": {
           "CMD": "SET_PIN",
           "ID": "205",
           "PIN": "6"
         },
         "termostat_set": {
           "CMD": "SET_ROOM_TEMP",
-          "ID": "97"
-        },
-        "termostat_on": {
-          "CMD": "SET_THST_ON",
-          "ID": "97"
-        },
-        "termostat_off": {
-          "CMD": "SET_THST_OFF",
-          "ID": "97"
-        },
-        "termostat_heating": {
-          "CMD": "SET_THST_HEATING",
-          "ID": "97"
-        },
-        "termostat_cooling": {
-          "CMD": "SET_THST_COOLING",
           "ID": "97"
         }
       },
@@ -360,7 +264,7 @@
           "CMD": "SET_PASSWORD",
           "ID": "206"
         },
-        "light_main": {
+        "light_luster": {
           "CMD": "SET_PIN",
           "ID": "206",
           "PIN": "1"
@@ -370,39 +274,23 @@
           "ID": "206",
           "PIN": "2"
         },
-        "light_wc": {
+        "light_krevet": {
           "CMD": "SET_PIN",
           "ID": "206",
           "PIN": "3"
         },
-        "light_desk": {
+        "light_wc": {
           "CMD": "SET_PIN",
           "ID": "206",
           "PIN": "5"
         },
-        "light_balcony": {
+        "light_ogledalo": {
           "CMD": "SET_PIN",
           "ID": "206",
           "PIN": "6"
         },
         "termostat_set": {
           "CMD": "SET_ROOM_TEMP",
-          "ID": "98"
-        },
-        "termostat_on": {
-          "CMD": "SET_THST_ON",
-          "ID": "98"
-        },
-        "termostat_off": {
-          "CMD": "SET_THST_OFF",
-          "ID": "98"
-        },
-        "termostat_heating": {
-          "CMD": "SET_THST_HEATING",
-          "ID": "98"
-        },
-        "termostat_cooling": {
-          "CMD": "SET_THST_COOLING",
           "ID": "98"
         }
       },
@@ -418,7 +306,7 @@
           "CMD": "SET_PASSWORD",
           "ID": "505"
         },
-        "light_main": {
+        "light_luster": {
           "CMD": "SET_PIN",
           "ID": "212",
           "PIN": "1"
@@ -428,39 +316,23 @@
           "ID": "212",
           "PIN": "2"
         },
-        "light_wc": {
+        "light_krevet": {
           "CMD": "SET_PIN",
           "ID": "212",
           "PIN": "3"
         },
-        "light_desk": {
+        "light_wc": {
           "CMD": "SET_PIN",
           "ID": "213",
           "PIN": "1"
         },
-        "light_balcony": {
+        "light_ogledalo": {
           "CMD": "SET_PIN",
           "ID": "213",
           "PIN": "2"
         },
         "termostat_set": {
           "CMD": "SET_ROOM_TEMP",
-          "ID": "213"
-        },
-        "termostat_on": {
-          "CMD": "SET_THST_ON",
-          "ID": "213"
-        },
-        "termostat_off": {
-          "CMD": "SET_THST_OFF",
-          "ID": "213"
-        },
-        "termostat_heating": {
-          "CMD": "SET_THST_HEATING",
-          "ID": "213"
-        },
-        "termostat_cooling": {
-          "CMD": "SET_THST_COOLING",
           "ID": "213"
         }
       },

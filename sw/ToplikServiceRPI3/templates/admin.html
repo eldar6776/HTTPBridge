@@ -1,0 +1,661 @@
+<!doctype html>
+<html lang="hr" data-theme="light">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <title>Admin Dashboard (v2.5.0)</title>
+    <style>
+        .container-fluid {
+            display: grid;
+            grid-template-columns: 240px 1fr;
+            gap: 1.5rem;
+            min-height: 95vh;
+        }
+        aside {
+            border-right: 1px solid var(--pico-muted-border-color);
+            padding-right: 1.5rem;
+        }
+        aside nav ul { list-style: none; padding-left: 0; }
+        aside nav li a {
+            display: block; padding: 0.5rem 0.75rem; margin-bottom: 0.25rem;
+            border-radius: var(--pico-border-radius); text-decoration: none;
+            font-weight: 500;
+        }
+        aside nav li a:hover, aside nav li a.active {
+            background-color: var(--pico-primary-background);
+            color: var(--pico-primary-inverse);
+        }
+        .grid {
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        }
+        .button-group {
+            display: flex; flex-wrap: wrap; gap: 0.5rem;
+        }
+        #esp-pins-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 1.5rem;
+            margin-top: 1rem;
+        }
+        #esp-pins-container label {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 1.1rem;
+            font-family: monospace;
+            padding: 0.75rem;
+            border: 1px solid var(--pico-muted-border-color);
+            border-radius: var(--pico-border-radius);
+        }
+        /* NOVO: Stil za polja za pin validnost */
+        .pin-validity-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr; /* Dvije kolone za PIN i Validnost */
+            gap: 1rem;
+        }
+        .pin-validity-grid > div {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .pin-validity-grid .time-date-grid {
+             display: grid;
+             grid-template-columns: 1fr 1fr;
+             gap: 0.5rem;
+        }
+        .pin-button-group {
+            display: flex;
+            gap: 0.5rem;
+            align-items: flex-end;
+            margin-top: 1.5rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <aside>
+            <h4>Toplik Service</h4>
+            <nav>
+                <ul id="sidebar-list">
+                    {% for pin, soba in sobe.items() %}
+                    <li>
+                        <a href="#" 
+                           class="soba-link"
+                           data-room-id="{{ pin }}" 
+                           data-guest-pin="{{ soba.guest_pin }}" 
+                           data-mdns="{{ soba.mdns }}"
+                           data-port="{{ soba.port }}"
+                           data-pin-id="{{ soba.pin_controller_id }}"
+                           data-th-id="{{ soba.termostat_id }}">
+                           <span class="soba-ime">{{ soba.ime }}</span>
+                        </a>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </nav>
+        </aside>
+
+        <main>
+            <h2>Admin Dashboard</h2>
+            <p id="upute">Odaberite sobu s lijeve strane za pregled i izmjenu postavki.</p>
+            
+            <article id="soba-kontrole" style="display: none;">
+                <h3 id="odabrana-soba-ime"></h3>
+                
+                <div class="button-group">
+                    <button id="get-status-btn" aria-busy="false">
+                        <i class="bi bi-arrow-clockwise"></i> Osvježi Podatke
+                    </button>
+                    <button id="restart-esp-btn" class="secondary" aria-busy="false">
+                        <i class="bi bi-power"></i> Restartuj Uređaj
+                    </button>
+                    <button id="sync-time-btn" class="secondary" aria-busy="false">
+                        <i class="bi bi-clock-history"></i> Sinhronizuj Vrijeme
+                    </button>
+                </div>
+                
+                <div id="admin-poruka" style="margin-top: 1rem;"></div>
+                <hr>
+                
+                <form id="admin-forma">
+                    <h4>Mrežne Postavke</h4>
+                    <div class="grid">
+                        <label>
+                            mDNS Ime
+                            <input type="text" id="admin-mdns" name="mdns">
+                        </label>
+                        <label>
+                            TCP/IP Adresa (Očitano)
+                            <input type="text" id="admin-ip" name="ip_address" disabled>
+                        </label>
+                        <label>
+                            TCP/IP Port
+                            <input type="number" id="admin-port" name="port">
+                        </label>
+                    </div>
+                    <div class="grid">
+                        <label>
+                            WiFi SSID
+                            <input type="text" id="admin-ssid" name="wifi_ssid">
+                        </label>
+                        <label>
+                            WiFi Lozinka (ostavi prazno ako je otvorena)
+                            <input type="text" id="admin-password" name="wifi_password">
+                        </label>
+                    </div>
+                    
+                    <hr>
+                    <h4>Postavke Termostata (Lokalni ESP)</h4>
+                    <div class="grid">
+                         <label>
+                            Zadana Temp (Setpoint)
+                            <input type="number" step="0.5" id="admin-setpoint" name="setpoint">
+                        </label>
+                        <label>
+                            Trenutna Temp (Očitano)
+                            <input type="text" id="admin-temp" disabled>
+                        </label>
+                        
+                        <label for="admin-mode">
+                            Mod Rada (Podešavanje)
+                            <select id="admin-mode" name="mode">
+                                <option value="ON">Uključi (Zadnji Mod)</option>
+                                <option value="HEATING">Grijanje (HEATING)</option>
+                                <option value="COOLING">Hlađenje (COOLING)</option>
+                                <option value="OFF">Isključeno (OFF)</option>
+                            </select>
+                        </label>
+                        
+                    </div>
+                    <div class="grid">
+                        <label>
+                            Diferenca (Diff)
+                            <input type="text" id="admin-diff" name="diff" placeholder="npr. 0.5">
+                        </label>
+                        <label>
+                            EMA Filter
+                            <input type="text" id="admin-ema_filter" name="ema_filter" placeholder="npr. 0.2">
+                        </label>
+                        <label>
+                            Status Ventilatora (Očitano)
+                            <input type="text" id="admin-fan" disabled>
+                        </label>
+                         <label>
+                            Status Ventila (Očitano)
+                            <input type="text" id="admin-pump_valve" disabled>
+                        </label>
+                    </div>
+                    
+                    <hr>
+                    <h4>Ostale Postavke</h4>
+                    <div class="grid">
+                        <label>
+                            Timer ON (npr. 2030 ili SUNSET)
+                            <input type="text" id="admin-timeron" name="timer_on">
+                        </label>
+                        <label>
+                            Timer OFF (npr. 0630 ili SUNRISE)
+                            <input type="text" id="admin-timeroff" name="timer_off">
+                        </label>
+                        
+                        <label for="admin-pingwdg-switch">
+                            Ping Watchdog
+                            <input type="checkbox" id="admin-pingwdg-switch" name="ping_watchdog" role="switch">
+                        </label>
+                    </div>
+                    
+                    <hr>
+                    <button type="submit" id="save-settings-btn" aria-busy="false">
+                        Spremi Promjene na Uređaj
+                    </button>
+                </form>
+
+                <hr>
+                <h4>Stanje Pinova (ESP32) - Instant Kontrola</h4>
+                <div id="esp-pins-container">
+                    <p>Učitavam pinove...</p>
+                </div>
+
+            </article>
+
+            <article id="pin-change-article" style="display: none; margin-top: 1.5rem;">
+                <h4>Upravljanje PIN-om Gosta (G1)</h4>
+                <form id="pin-forma">
+                    
+                    <div class="pin-validity-grid">
+                        
+                        <div>
+                            <label for="admin-new-pin">
+                                Trenutni / Novi PIN Gosta
+                                <input type="text" id="admin-new-pin" name="new_pin" required>
+                            </label>
+                        </div>
+                        
+                        <div>
+                            
+                            <div class="time-date-grid">
+                                <label for="admin-exp-time">
+                                    Vrijeme (HH:MM)
+                                    <input type="time" id="admin-exp-time" name="exp_time" value="12:00">
+                                </label>
+                                <label for="admin-exp-date">
+                                    Datum (DD.MM.YYYY)
+                                    <input type="date" id="admin-exp-date" name="exp_date">
+                                </label>
+                            </div>
+                            <small>Ako je prazno, PIN traje do 01.01.30. </small>
+                        </div>
+                    </div>
+
+                    <div class="pin-button-group">
+                         <button type="submit" id="save-pin-btn" aria-busy="false">
+                            <i class="bi bi-key-fill"></i> Postavi Novi PIN
+                        </button>
+                        <button type="button" id="delete-pin-btn" class="secondary" aria-busy="false">
+                            <i class="bi bi-trash-fill"></i> Obriši PIN (G1X)
+                        </button>
+                    </div>
+                </form>
+                <div id="pin-poruka" style="margin-top: 1rem;"></div>
+            </article>
+
+        </main>
+    </div>
+
+    <script>
+        let odabraniUredjaj = {
+            linkElement: null
+        };
+        const getStatusBtn = document.getElementById('get-status-btn');
+        const saveSettingsBtn = document.getElementById('save-settings-btn');
+        const adminForm = document.getElementById('admin-forma');
+        const adminPoruka = document.getElementById('admin-poruka');
+        
+        const restartBtn = document.getElementById('restart-esp-btn');
+        const syncTimeBtn = document.getElementById('sync-time-btn');
+        const espPinsContainer = document.getElementById('esp-pins-container');
+
+        const pinChangeArticle = document.getElementById('pin-change-article');
+        const pinForm = document.getElementById('pin-forma');
+        const savePinBtn = document.getElementById('save-pin-btn');
+        const deletePinBtn = document.getElementById('delete-pin-btn');
+        const pinPoruka = document.getElementById('pin-poruka');
+        const pinInput = document.getElementById('admin-new-pin');
+        
+        const expDateInput = document.getElementById('admin-exp-date');
+        const expTimeInput = document.getElementById('admin-exp-time');
+
+
+        // --- 1. ODABIR SOBE U SIDEBARU ---
+        document.querySelectorAll('.soba-link').forEach(link => {
+            link.addEventListener('click', function(e) {
+                e.preventDefault();
+                
+                odabraniUredjaj = {
+                    room_id: this.dataset.roomId,
+                    guest_pin: this.dataset.guestPin,
+                    mdns: this.dataset.mdns,
+                    port: this.dataset.port,
+                    pin_controller_id: this.dataset.pinId,
+                    termostat_id: this.dataset.thId,
+                    ime: this.querySelector('.soba-ime').textContent,
+                    linkElement: this
+                };
+
+                document.getElementById('upute').style.display = 'none';
+                document.getElementById('soba-kontrole').style.display = 'block';
+                pinChangeArticle.style.display = 'block';
+                
+                document.getElementById('odabrana-soba-ime').textContent = odabraniUredjaj.ime;
+                adminPoruka.textContent = '';
+                pinPoruka.textContent = '';
+                adminForm.reset(); 
+                pinForm.reset();
+                
+                // POSTAVLJA TRENUTNI PIN
+                pinInput.value = odabraniUredjaj.guest_pin;
+                
+                document.querySelectorAll('.soba-link').forEach(l => l.classList.remove('active'));
+                this.classList.add('active');
+                
+                dohvatiStatus();
+            });
+        });
+
+        // --- 2. DOHVATI STATUS (GET_STATUS) ---
+        getStatusBtn.addEventListener('click', dohvatiStatus);
+
+        function dohvatiStatus() {
+            if (!odabraniUredjaj.mdns) return;
+
+            postaviPoruku(adminPoruka, 'Dohvaćam status...', 'normal');
+            setDugmadBusy(true, [getStatusBtn]);
+
+            fetch('/api/admin/get_status', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mdns: odabraniUredjaj.mdns })
+            })
+            .then(handleAdminResponse)
+            .then(data => {
+                if (data.success) {
+                    postaviPoruku(adminPoruka, 'Status uspješno učitan.', 'success');
+                    popuniFormu(data.status);
+                    popuniPinove(data.status.pins);
+                } else {
+                    postaviPoruku(adminPoruka, 'Greška: ' + data.message, 'error');
+                }
+            })
+            .catch(err => handleAdminError(err, adminPoruka, 'Greška pri dohvaćanju statusa.'))
+            .finally(() => {
+                setDugmadBusy(false, [getStatusBtn]);
+            });
+        }
+        
+        // --- 3. POPUNI FORMU (JavaScript) ---
+        function popuniFormu(status) {
+            document.getElementById('admin-mdns').value = status.mdns || '';
+            document.getElementById('admin-ip').value = status.ip_address || '';
+            document.getElementById('admin-port').value = status.port || '';
+            document.getElementById('admin-ssid').value = status.wifi_ssid || '';
+            document.getElementById('admin-password').value = status.wifi_password || '';
+            
+            document.getElementById('admin-setpoint').value = status.setpoint || '';
+            document.getElementById('admin-temp').value = status.temp || ''; 
+            document.getElementById('admin-mode').value = (status.mode || 'OFF').toUpperCase();
+            document.getElementById('admin-diff').value = status.diff || '';
+            document.getElementById('admin-ema_filter').value = status.ema_filter || '';
+            document.getElementById('admin-fan').value = status.fan || '';
+            document.getElementById('admin-pump_valve').value = status.pump_valve || '';
+            
+            document.getElementById('admin-timeron').value = status.timer_on || '';
+            document.getElementById('admin-timeroff').value = status.timer_off || '';
+            
+            const pingWdg = status.ping_watchdog || "DISABLED";
+            document.getElementById('admin-pingwdg-switch').checked = (pingWdg.toUpperCase() === 'ENABLED' || pingWdg.toUpperCase() === 'ON');
+        }
+
+        // --- 3b. POPUNI PINOVE (Isto) ---
+        function popuniPinove(pins) {
+            espPinsContainer.innerHTML = ''; 
+            if (!pins || Object.keys(pins).length === 0) {
+                espPinsContainer.innerHTML = '<p>Nema dostupnih pinova.</p>';
+                return;
+            }
+
+            for (const [pinBroj, stanje] of Object.entries(pins)) {
+                const isChecked = (stanje.toUpperCase() === 'HIGH');
+                // Isključujemo INPUT pinove
+                if (pinBroj === '34' || pinBroj === '35' || pinBroj === '36' || pinBroj === '39') {
+                    continue; 
+                }
+                
+                const label = document.createElement('label');
+                label.innerHTML = `
+                    <span>GPIO${pinBroj}</span>
+                    <input type="checkbox" role="switch" data-pin="${pinBroj}" ${isChecked ? 'checked' : ''}>
+                `;
+                espPinsContainer.appendChild(label);
+            }
+        }
+        
+        // --- 3c. INSTANT REAKCIJA PINOVA (Isto) ---
+        espPinsContainer.addEventListener('change', function(e) {
+            if (e.target.matches('input[role="switch"]')) {
+                const pin = e.target.dataset.pin;
+                const state = e.target.checked;
+                
+                postaviPoruku(adminPoruka, `Šaljem komandu za GPIO${pin}...`, 'normal');
+                e.target.disabled = true;
+
+                fetch('/api/admin/esp_pin_control', {
+                     method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        mdns: odabraniUredjaj.mdns,
+                        pin: pin,
+                        state: state
+                    })
+                })
+                .then(handleAdminResponse)
+                .then(data => {
+                    if (data.success) {
+                        postaviPoruku(adminPoruka, `GPIO${pin} je postavljen na ${state ? 'HIGH' : 'LOW'}.`, 'success');
+                    } else {
+                        postaviPoruku(adminPoruka, 'Greška: ' + data.message, 'error');
+                        e.target.checked = !state;
+                    }
+                })
+                .catch(err => handleAdminError(err, adminPoruka, 'Greška pri slanju komande za pin.'))
+                .finally(() => {
+                    e.target.disabled = false;
+                });
+            }
+        });
+
+        // --- 4. SPREMI POSTAVKE (SET_...) (Isto) ---
+        adminForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            if (!odabraniUredjaj.mdns) return;
+
+            postaviPoruku(adminPoruka, 'Šaljem postavke...', 'normal');
+            setDugmadBusy(true, [saveSettingsBtn]);
+            
+            const formData = new FormData(adminForm);
+            const novePostavke = {};
+            formData.forEach((value, key) => {
+                novePostavke[key] = value;
+            });
+            
+            novePostavke.ping_watchdog = document.getElementById('admin-pingwdg-switch').checked;
+
+            fetch('/api/admin/set_settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    mdns: odabraniUredjaj.mdns,
+                    termostat_id: odabraniUredjaj.termostat_id, 
+                    settings: novePostavke
+                })
+            })
+            .then(handleAdminResponse)
+            .then(data => {
+                postaviPoruku(adminPoruka, data.message || 'Gotovo.', data.success ? 'success' : 'error');
+                dohvatiStatus(); 
+            })
+            .catch(err => handleAdminError(err, adminPoruka, 'Greška pri spremanju postavki.'))
+            .finally(() => {
+                setDugmadBusy(false, [saveSettingsBtn]);
+            });
+        });
+        
+        // --- 5. RESTART UREĐAJA (Isto) ---
+        restartBtn.addEventListener('click', function() {
+            if (!odabraniUredjaj.mdns || !confirm(`Jeste li sigurni da želite restartovati uređaj '${odabraniUredjaj.ime}'?`)) {
+                return;
+            }
+            
+            postaviPoruku(adminPoruka, 'Šaljem komandu za restart...', 'normal');
+            setDugmadBusy(true, [restartBtn]);
+
+            fetch('/api/admin/restart_esp', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mdns: odabraniUredjaj.mdns })
+            })
+            .then(handleAdminResponse)
+            .then(data => {
+                if (data.success) {
+                    postaviPoruku(adminPoruka, 'Uređaj se restartuje. Pričekajte 30 sekundi prije osvježavanja statusa.', 'success');
+                } else {
+                    postaviPoruku(adminPoruka, data.message, 'error');
+                }
+            })
+            .catch(err => handleAdminError(err, adminPoruka, 'Greška pri slanju restarta.'))
+            .finally(() => {
+                setDugmadBusy(false, [restartBtn]);
+            });
+        });
+
+        // --- 6. SINHRONIZACIJA VREMENA (Isto) ---
+        syncTimeBtn.addEventListener('click', function() {
+            if (!odabraniUredjaj.mdns) return;
+            
+            const now = new Date();
+            const pad = (n) => n.toString().padStart(2, '0');
+            const dateStr = pad(now.getDate()) + pad(now.getMonth() + 1) + pad(now.getFullYear() % 100); // DDMMYY
+            const timeStr = pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds()); // HHMMSS
+            
+            postaviPoruku(adminPoruka, `Šaljem lokalno vrijeme (${dateStr} ${timeStr})...`, 'normal');
+            setDugmadBusy(true, [syncTimeBtn]);
+
+            fetch('/api/admin/set_esp_time', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    mdns: odabraniUredjaj.mdns,
+                    date: dateStr,
+                    time: timeStr
+                })
+            })
+            .then(handleAdminResponse)
+            .then(data => {
+                postaviPoruku(adminPoruka, data.message, data.success ? 'success' : 'error');
+            })
+            .catch(err => handleAdminError(err, adminPoruka, 'Greška pri sinhronizaciji vremena.'))
+            .finally(() => {
+                setDugmadBusy(false, [syncTimeBtn]);
+            });
+        });
+
+        // --- 7. PROMJENA PINA (ADMIN) - AŽURIRANO ---
+        pinForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            if (!odabraniUredjaj.room_id) return;
+            
+            const newPin = pinInput.value; 
+            const expDate = expDateInput.value;
+            const expTime = expTimeInput.value;
+            
+            if (!newPin || newPin.length < 4) {
+                postaviPoruku(pinPoruka, 'PIN mora imati barem 4 znaka.', 'error');
+                return;
+            }
+
+            let validnost = '1200010130'; // Default: 12:00 01.01.2030.
+            
+            if (expDate && expTime) {
+                 const pad = (n) => n.toString().padStart(2, '0');
+                 try {
+                    // Datum (DDMMYY)
+                    const dateParts = expDate.split('-'); // YYYY-MM-DD
+                    const year = dateParts[0].substring(2);
+                    const month = dateParts[1];
+                    const day = dateParts[2];
+                    
+                    // Vrijeme (HHMM)
+                    const timeParts = expTime.split(':'); // HH:MM
+                    const hour = timeParts[0];
+                    const minute = timeParts[1];
+                    
+                    // Format: HHMMDDMMYY
+                    validnost = `${hour}${minute}${day}${month}${year}`;
+                    
+                 } catch (error) {
+                    postaviPoruku(pinPoruka, 'Greška u formatu Datuma/Vremena.', 'error');
+                    return;
+                 }
+            }
+            
+            postaviPoruku(pinPoruka, `Mijenjam PIN sobe ${odabraniUredjaj.ime} na ${newPin} (Istek: ${validnost})...`, 'normal');
+            setDugmadBusy(true, [savePinBtn]);
+
+            fetch('/api/admin/change_pin', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    room_id: odabraniUredjaj.room_id,
+                    new_pin: newPin,
+                    validity: validnost // NOVO: Šaljemo validnost
+                })
+            })
+            .then(handleAdminResponse)
+            .then(data => {
+                postaviPoruku(pinPoruka, data.message, data.success ? 'success' : 'error');
+                
+                if (data.success) {
+                    if (odabraniUredjaj.linkElement) {
+                        odabraniUredjaj.linkElement.dataset.guestPin = newPin; 
+                    }
+                    odabraniUredjaj.guest_pin = newPin;
+                }
+            })
+            .catch(err => handleAdminError(err, pinPoruka, 'Greška pri promjeni PIN-a.'))
+            .finally(() => {
+                setDugmadBusy(false, [savePinBtn]);
+            });
+        });
+        
+        // --- 8. BRISANJE PINA (ADMIN) - NOVO ---
+        deletePinBtn.addEventListener('click', function() {
+            if (!odabraniUredjaj.room_id) return;
+            
+            if (!confirm(`Jeste li sigurni da želite obrisati PIN (G1X) za sobu ${odabraniUredjaj.ime}?`)) {
+                return;
+            }
+            
+            postaviPoruku(pinPoruka, `Šaljem komandu G1X za brisanje PIN-a sobe ${odabraniUredjaj.ime}...`, 'normal');
+            setDugmadBusy(true, [deletePinBtn]);
+
+            fetch('/api/admin/delete_pin', { // Koristimo novu admin rutu (ista kao external/delete_pin)
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    room_id: odabraniUredjaj.room_id,
+                    delete_command: 'G1X' // Šaljemo komandu za brisanje
+                })
+            })
+            .then(handleAdminResponse)
+            .then(data => {
+                postaviPoruku(pinPoruka, data.message, data.success ? 'success' : 'error');
+                
+                if (data.success) {
+                    // Ažuriraj stanje na klijentu
+                    pinInput.value = '';
+                    if (odabraniUredjaj.linkElement) {
+                        odabraniUredjaj.linkElement.dataset.guestPin = ''; 
+                    }
+                    odabraniUredjaj.guest_pin = '';
+                }
+            })
+            .catch(err => handleAdminError(err, pinPoruka, 'Greška pri brisanju PIN-a.'))
+            .finally(() => {
+                setDugmadBusy(false, [deletePinBtn]);
+            });
+        });
+
+
+        // --- 9. Helper Funkcije za UI (Isto) ---
+        function setDugmadBusy(isBusy, buttons) {
+            buttons.forEach(btn => btn.setAttribute('aria-busy', isBusy ? 'true' : 'false'));
+        }
+        function postaviPoruku(element, poruka, tip) {
+            element.textContent = poruka;
+            element.style.color = (tip === 'error') ? 'var(--pico-del-color)' : 
+                                  (tip === 'success') ? 'var(--pico-confirmation-color)' : 
+                                  'var(--pico-secondary)';
+        }
+        function handleAdminResponse(response) {
+            if (response.status === 401) { window.location.href = '/admin'; }
+            return response.json();
+        }
+        function handleAdminError(err, element, poruka) {
+            console.error(err);
+            postaviPoruku(element, poruka || 'Greška u komunikaciji sa serverom.', 'error');
+        }
+
+    </script>
+</body>
+</html>

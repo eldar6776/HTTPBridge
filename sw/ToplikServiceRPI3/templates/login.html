@@ -1,13 +1,11 @@
 <!doctype html>
-<html lang="hr" data-theme="dark"> <head>
+<html lang="en" data-theme="dark"> <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
     
-    <title>Dobrodošli</title>
-    
-    <style>
+    <title>Welcome</title> <style>
       /* --- (Stilovi ostaju isti) --- */
       body, html {
         height: 100%;
@@ -46,11 +44,8 @@
   <body>
     <main>
       <article>
-        <h1>Dobrodošli</h1>
-        
-        <form id="loginForma">
-          <label for="pin">Molimo, unesite vaš PIN</label>
-          <input 
+        <h1>Welcome</h1> <form id="loginForma">
+          <label for="pin">Please enter your PIN</label> <input 
             type="password" 
             id="pin" 
             name="pin" 
@@ -60,66 +55,65 @@
             inputmode="numeric"
             autocomplete="new-password" >
           
-          <button type="submit" style="width: 100%;">Pristupi</button>
-        </form>
+          <button type="submit" style="width: 100%;">Access</button> </form>
         
       </article>
     </main>
     
    <script>
       // --------------------------------------------------------
-      // NOVI I KOMPLETAN JAVASCRIPT ZA LOGIN.HTML
+      // JAVASCRIPT SA ENGLESKIM PORUKAMA
       // --------------------------------------------------------
 
-      // AŽURIRANO 2: Osiguraj da je polje prazno kod učitavanja,
-      // bez obzira na cache browsera.
       document.addEventListener('DOMContentLoaded', function() {
         const pinInput = document.getElementById('pin');
         if (pinInput) {
-          pinInput.value = ''; // Očisti polje
+          pinInput.value = ''; 
         }
       });
 
       document.getElementById('loginForma').addEventListener('submit', function(event) {
-        event.preventDefault(); // Spriječi da stranica odradi "refresh"
+        event.preventDefault(); 
         
         const pin = document.getElementById('pin').value;
         const button = event.target.querySelector('button');
         const originalButtonText = button.textContent;
 
-        // Onemogući dugme dok traje provjera
         button.disabled = true;
-        button.textContent = 'Provjeravam...';
+        button.textContent = 'Checking...'; // Ažurirano
 
-        // Šalji PIN našem Python serveru na /api/login
         fetch('/api/login', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ pin: pin }), // Šaljemo JSON: {"pin": "VAŠ_PIN"}
+          body: JSON.stringify({ pin: pin }), 
         })
         .then(response => {
             if (response.ok) {
                 return response.json(); 
             } else {
+                // Pokušaj pročitati grešku koju je poslao server
                 return response.json().then(err => { 
-                    throw new Error(err.message || 'Pogrešan PIN'); 
+                    throw new Error(err.message || 'Incorrect PIN'); // Ažurirano
                 });
             }
         })
         .then(data => {
             if (data.success) {
+                // Uspjeh, preusmjeri na kontrolnu stranicu
                 window.location.href = '/soba';
             } else {
-                alert(data.message || 'Došlo je do greške.');
+                // Ovo se tehnički ne bi trebalo dogoditi zbog gornjeg 'catch'
+                alert(data.message || 'An error occurred.');
                 button.disabled = false;
                 button.textContent = originalButtonText;
             }
         })
         .catch(error => {
-            console.error('Greška pri prijavi:', error);
-            alert(error.message || 'Nije moguće provjeriti PIN.');
+            // Uhvati greške (npr. pogrešan PIN ili server pao)
+            console.error('Login error:', error);
+            alert(error.message || 'Could not verify PIN.'); // Ažurirano
             button.disabled = false;
             button.textContent = originalButtonText;
         });

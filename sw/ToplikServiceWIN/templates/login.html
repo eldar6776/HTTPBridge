@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en" data-theme="dark"> <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    
+    <title>Welcome</title> <style>
+      /* --- (Stilovi ostaju isti) --- */
+      body, html {
+        height: 100%;
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      }
+      body {
+        background-image: linear-gradient(rgba(0, 0, 0, 0.4), rgba(0, 0, 0, 0.4)), url('https://source.unsplash.com/random/1600x900/?resort,pool');
+        background-position: center;
+        background-repeat: no-repeat;
+        background-size: cover;
+        display: grid;
+        place-items: center;
+      }
+      article {
+        max-width: 380px;
+        width: 100%;
+        padding: 2rem;
+        border-radius: 1rem;
+        background-color: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+      }
+      h1 {
+        text-align: center;
+        color: white;
+      }
+      input[type="password"] {
+        text-align: center;
+        font-size: 1.5rem;
+        letter-spacing: 0.2em;
+      }
+    </style>
+  </head>
+  
+  <body>
+    <main>
+      <article>
+        <h1>Welcome</h1> <form id="loginForma">
+          <label for="pin">Please enter your PIN</label> <input 
+            type="password" 
+            id="pin" 
+            name="pin" 
+            placeholder="••••" 
+            required
+            pattern="\d*"      
+            inputmode="numeric"
+            autocomplete="new-password" >
+          
+          <button type="submit" style="width: 100%;">Access</button> </form>
+        
+      </article>
+    </main>
+    
+   <script>
+      // --------------------------------------------------------
+      // JAVASCRIPT SA ENGLESKIM PORUKAMA
+      // --------------------------------------------------------
+
+      document.addEventListener('DOMContentLoaded', function() {
+        const pinInput = document.getElementById('pin');
+        if (pinInput) {
+          pinInput.value = ''; 
+        }
+      });
+
+      document.getElementById('loginForma').addEventListener('submit', function(event) {
+        event.preventDefault(); 
+        
+        const pin = document.getElementById('pin').value;
+        const button = event.target.querySelector('button');
+        const originalButtonText = button.textContent;
+
+        button.disabled = true;
+        button.textContent = 'Checking...'; // Ažurirano
+
+        fetch('/api/login', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ pin: pin }), 
+        })
+        .then(response => {
+            if (response.ok) {
+                return response.json(); 
+            } else {
+                // Pokušaj pročitati grešku koju je poslao server
+                return response.json().then(err => { 
+                    throw new Error(err.message || 'Incorrect PIN'); // Ažurirano
+                });
+            }
+        })
+        .then(data => {
+            if (data.success) {
+                // Uspjeh, preusmjeri na kontrolnu stranicu
+                window.location.href = '/soba';
+            } else {
+                // Ovo se tehnički ne bi trebalo dogoditi zbog gornjeg 'catch'
+                alert(data.message || 'An error occurred.');
+                button.disabled = false;
+                button.textContent = originalButtonText;
+            }
+        })
+        .catch(error => {
+            // Uhvati greške (npr. pogrešan PIN ili server pao)
+            console.error('Login error:', error);
+            alert(error.message || 'Could not verify PIN.'); // Ažurirano
+            button.disabled = false;
+            button.textContent = originalButtonText;
+        });
+      });
+    </script>
+  </body>
+</html>

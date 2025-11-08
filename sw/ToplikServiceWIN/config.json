@@ -1,0 +1,134 @@
+{
+  "admin_password": "vasa-tajna-admin-lozinka-123",
+  "external_api_key": "KLJUC-ZA-HOTELSKI-SOFTVER-98765",
+  "sobe": {
+    "301": {
+      "ime": "Soba 301",
+      "guest_pin": "301",
+      "mdns": "soba301.local",
+      "port": "8020",
+      "uredjaji": {
+        "pin_controller": { "CMD": "SET_PASSWORD", "ID": "200" },
+        "light_luster": { "CMD": "SET_PIN", "ID": "200", "PIN": "1" },
+        "light_ambient": { "CMD": "SET_PIN", "ID": "200", "PIN": "2" },
+        "light_krevet": { "CMD": "SET_PIN", "ID": "200", "PIN": "3" },
+        "light_wc": { "CMD": "SET_PIN", "ID": "200", "PIN": "5" },
+        "light_ogledalo": { "CMD": "SET_PIN", "ID": "200", "PIN": "6" },
+        "termostat_set": { "CMD": "SET_ROOM_TEMP", "ID": "92" }
+      },
+      "cached_ip": null
+    },
+    "302": {
+      "ime": "Soba 302",
+      "guest_pin": "302",
+      "mdns": "soba302.local",
+      "port": "8020",
+      "uredjaji": {
+        "pin_controller": { "CMD": "SET_PASSWORD", "ID": "201" },
+        "light_luster": { "CMD": "SET_PIN", "ID": "201", "PIN": "1" },
+        "light_ambient": { "CMD": "SET_PIN", "ID": "201", "PIN": "2" },
+        "light_krevet": { "CMD": "SET_PIN", "ID": "201", "PIN": "3" },
+        "light_wc": { "CMD": "SET_PIN", "ID": "201", "PIN": "5" },
+        "light_ogledalo": { "CMD": "SET_PIN", "ID": "201", "PIN": "6" },
+        "termostat_set": { "CMD": "SET_ROOM_TEMP", "ID": "93" }
+      },
+      "cached_ip": null
+    },
+    "303": {
+      "ime": "Soba 303",
+      "guest_pin": "303",
+      "mdns": "soba303.local",
+      "port": "8020",
+      "uredjaji": {
+        "pin_controller": { "CMD": "SET_PASSWORD", "ID": "202" },
+        "light_luster": { "CMD": "SET_PIN", "ID": "202", "PIN": "1" },
+        "light_ambient": { "CMD": "SET_PIN", "ID": "202", "PIN": "2" },
+        "light_krevet": { "CMD": "SET_PIN", "ID": "202", "PIN": "3" },
+        "light_wc": { "CMD": "SET_PIN", "ID": "202", "PIN": "5" },
+        "light_ogledalo": { "CMD": "SET_PIN", "ID": "202", "PIN": "6" },
+        "termostat_set": { "CMD": "SET_ROOM_TEMP", "ID": "94" }
+      },
+      "cached_ip": null
+    },
+    "501": {
+      "ime": "Soba 501",
+      "guest_pin": "501",
+      "mdns": "soba501.local",
+      "port": "8020",
+      "uredjaji": {
+        "pin_controller": { "CMD": "SET_PASSWORD", "ID": "203" },
+        "light_luster": { "CMD": "SET_PIN", "ID": "203", "PIN": "1" },
+        "light_ambient": { "CMD": "SET_PIN", "ID": "203", "PIN": "2" },
+        "light_krevet": { "CMD": "SET_PIN", "ID": "203", "PIN": "3" },
+        "light_wc": { "CMD": "SET_PIN", "ID": "203", "PIN": "5" },
+        "light_ogledalo": { "CMD": "SET_PIN", "ID": "203", "PIN": "6" },
+        "termostat_set": { "CMD": "SET_ROOM_TEMP", "ID": "95" }
+      },
+      "cached_ip": null
+    },
+    "502": {
+      "ime": "Soba 502",
+      "guest_pin": "502",
+      "mdns": "soba502.local",
+      "port": "8020",
+      "uredjaji": {
+        "pin_controller": { "CMD": "SET_PASSWORD", "ID": "204" },
+        "light_luster": { "CMD": "SET_PIN", "ID": "204", "PIN": "1" },
+        "light_ambient": { "CMD": "SET_PIN", "ID": "204", "PIN": "2" },
+        "light_krevet": { "CMD": "SET_PIN", "ID": "204", "PIN": "3" },
+        "light_wc": { "CMD": "SET_PIN", "ID": "204", "PIN": "5" },
+        "light_ogledalo": { "CMD": "SET_PIN", "ID": "204", "PIN": "6" },
+        "termostat_set": { "CMD": "SET_ROOM_TEMP", "ID": "96" }
+      },
+      "cached_ip": null
+    },
+    "503": {
+      "ime": "Soba 503",
+      "guest_pin": "503",
+      "mdns": "soba503.local",
+      "port": "8020",
+      "uredjaji": {
+        "pin_controller": { "CMD": "SET_PASSWORD", "ID": "205" },
+        "light_luster": { "CMD": "SET_PIN", "ID": "205", "PIN": "1" },
+        "light_ambient": { "CMD": "SET_PIN", "ID": "205", "PIN": "2" },
+        "light_krevet": { "CMD": "SET_PIN", "ID": "205", "PIN": "3" },
+        "light_wc": { "CMD": "SET_PIN", "ID": "205", "PIN": "5" },
+        "light_ogledalo": { "CMD": "SET_PIN", "ID": "205", "PIN": "6" },
+        "termostat_set": { "CMD": "SET_ROOM_TEMP", "ID": "97" }
+      },
+      "cached_ip": null
+    },
+    "504": {
+      "ime": "Soba 504",
+      "guest_pin": "504",
+      "mdns": "soba504.local",
+      "port": "8020",
+      "uredjaji": {
+        "pin_controller": { "CMD": "SET_PASSWORD", "ID": "206" },
+        "light_luster": { "CMD": "SET_PIN", "ID": "206", "PIN": "1" },
+        "light_ambient": { "CMD": "SET_PIN", "ID": "206", "PIN": "2" },
+        "light_krevet": { "CMD": "SET_PIN", "ID": "206", "PIN": "3" },
+        "light_wc": { "CMD": "SET_PIN", "ID": "206", "PIN": "5" },
+        "light_ogledalo": { "CMD": "SET_PIN", "ID": "206", "PIN": "6" },
+        "termostat_set": { "CMD": "SET_ROOM_TEMP", "ID": "98" }
+      },
+      "cached_ip": null
+    },
+    "505": {
+      "ime": "Soba 505",
+      "guest_pin": "9988",
+      "mdns": "soba505.local",
+      "port": "8020",
+      "uredjaji": {
+        "pin_controller": { "CMD": "SET_PASSWORD", "ID": "505" },
+        "light_luster": { "CMD": "SET_PIN", "ID": "212", "PIN": "1" },
+        "light_ambient": { "CMD": "SET_PIN", "ID": "212", "PIN": "2" },
+        "light_krevet": { "CMD": "SET_PIN", "ID": "212", "PIN": "3" },
+        "light_wc": { "CMD": "SET_PIN", "ID": "213", "PIN": "1" },
+        "light_ogledalo": { "CMD": "SET_PIN", "ID": "213", "PIN": "2" },
+        "termostat_set": { "CMD": "SET_ROOM_TEMP", "ID": "213" }
+      },
+      "cached_ip": "192.168.88.68"
+    }
+  }
+}

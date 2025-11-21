@@ -1,0 +1,736 @@
+						TOPLIK RESORT
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+			LISTA IMPLEMENTIRANIH HTTP KOMANDI
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+pritisak na taster BOOT duži od 5 sekundi briše postavke wifi konekcije 
+i pokreće wifi manager portal ssid  WiFiManager na ip  192.168.4.1 
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	GET_STATUS
+
+opis:		preuzmi sve postavke uređaja
+			
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=GET_STATUS
+
+odgovor: 	WIFI SSID=WiFi0
+			WIFI PASSWORD=23456789
+			mDNS=soba501
+			TCP/IP Port=8020
+			TCP/IP Address=192.168.88.72
+			Current Time (UTC)=: 2025-06-05 15:41:00
+			Timezone Offset=120 min
+			Daylight Saving Time=YES
+			Light Relay State=OFF
+			TIMERON=SUNSET
+			TIMEROFF=SUNRISE
+			ONTIME=00:00
+			OFFTIME=00:00
+			SUNRISE=05:05
+			SUNSET=20:24
+			Ping Watchdog=ENABLED
+			ESP Pin States:
+			GPIO12=LOW
+			GPIO13=LOW
+			GPIO14=LOW
+			GPIO15=HIGH
+			GPIO19=LOW
+			GPIO21=LOW
+			GPIO22=LOW
+			GPIO34=LOW
+			GPIO35=LOW
+			GPIO36=LOW
+			ESP Thermostat State:
+			Temp=24.6*C
+			Setpoint=20.0*C
+			Diff=0.5*C
+			Mode=COOLING
+			FC Pump / Valve=ON
+			Floor Pump=OFF
+			Fan=MEDIUM
+			EMA Filter=0.5
+			Fluid=25.8*C
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	GET_IP_ADDRESS
+
+opis:		traži trenutnu ip adresu direktno od uređeja. pristup ip
+			adresom je neuporedivo brži od pristupa mDNS imenom tako 
+			da je najbolji mehanizam pristupa pronalaženje uređaja 
+			mDNS imenom i zamjena ip adresom do sledećeg prekida 
+			u pristupu ili povremeni poziv na mDNS i zamjena ip adresom
+			
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=GET_IP_ADDRESS
+
+odgovor: 	TCP/IP Address = 192.168.88.72
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	GET_SSID_PSWRD
+
+opis:		preuzmi trenutne postavke za wifi konekciju SSID i PASSWORD 
+			ako je mreža otvorena bez lozinke onda samo SSID
+			ovo je ispis iz flash memorije i ovo su postavke koje 
+			će biti učitane nakon restarta, ovo je provjera upisa
+			
+
+primjer: 	http://soba505.local:8021/sysctrl.cgi?CMD=GET_SSID_PSWRD
+
+odgovor: 	SSID = WiFi0
+			PASSWORD = 23456789 ili PASSWORD = Not Set (OPEN NETWORK)
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	GET_MDNS_NAME
+
+opis:		preuzmi mDNS alias uređaja na mreži, ovo je ispis iz flash 
+			memorije i ovo je ime uređaja na mreži koje  će biti učitano
+			nakon restarta, ovo je provjera komande upisa 
+
+primjer: 	http://soba505.local:8021/sysctrl.cgi?CMD=GET_MDNS_NAME
+
+odgovor: 	mDNS = soba505
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	GET_TCPIP_PORT
+
+opis:		preuzmi port uređaja na mreži, ovo je ispis iz flash memorije
+			i ovo je port uređaja na mreži koje  će biti učitan nakon
+			restarta, ovo je provjera komande upisa 
+
+primjer: 	http://soba505.local:8021/sysctrl.cgi?CMD=GET_TCPIP_PORT
+
+odgovor: 	TCP/IP Port = 8021
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	GET_ROOM_TEMP
+
+opis:		upit trenutne i zadane temperature sobe, bitno je adresirati
+			kontroler sa senzorom temperature t.j. termostat u sobi
+
+primjer: 	http://soba505.local:8021/sysctrl.cgi?CMD=GET_ROOM_TEMP&ID=92
+
+odgovor: 	Room Temperature = 26*C
+			Setpoint Temperature = 24*C
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	GET_GUEST_IN_TEMP
+
+opis:		preuzmi podešenu temperaturu sobe kada gost uđe sa karticom,
+			bitno je adresirati kontroler sa ulazom za odlagač kartica
+
+primjer: 	http://soba505.local:8021/sysctrl.cgi?CMD=GET_GUEST_IN_TEMP&ID=201
+
+odgovor: 	Guest In Temperature = 22*C
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	GET_GUEST_OUT_TEMP
+
+opis:		preuzmi podešenu temperaturu sobe kada gost izvadi karticu 
+			iz odlagača bitno je adresirati kontroler sa ulazom za 
+			odlagač kartica
+
+primjer: 	http://soba505.local:8021/sysctrl.cgi?CMD=GET_GUEST_OUT_TEMP&ID=201
+
+odgovor: 	Guest Out Temperature = 18*C
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	GET_FAN_DIFFERENCE
+
+opis:		preuzmi podešenu temperaturnu diferencu termostata
+
+primjer: 	http://soba505.local:8021/sysctrl.cgi?CMD=GET_FAN_DIFFERENCE&ID=200
+
+odgovor: 	Fan Difference = 0*C
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	GET_FAN_BAND
+
+opis:		preuzmi podešeni lo i high band termostata za kontrolu 
+			prelaza brzina fancoil motora
+
+primjer: 	http://soba505.local:8021/sysctrl.cgi?CMD=GET_FAN_BAND&ID=200
+
+odgovor: 	Fan Low Band = 1*C
+			Fan High Band = 2*C
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	GET_PINS
+
+opis:		preuzmi trenutno stanje izlaznih pinova sobnih kontrolera,
+			na kontroleru na kojem je priključen odlagač kartica
+			sa lijeva na desno su:
+			1 = SCENE 1
+			2 = SCENE 2
+			3 = SCENE 3
+			4 = BUZZER
+			5 = NE KORISTI SE PIN
+			6 = NE KORISTI SE PIN
+			7 = NE POSTOJI PIN
+			8 = NE POSTOJI PIN
+			
+			na kontroleru na kojem je termostat i kontrola motora
+			fancoila sa lijeva na desno su:
+			1 = SVJETLO KUPATILA
+			2 = SVJETLO OGLEDALA
+			3 = MOTOR NAJVEĆA BRZINA
+			4 = BUZZER
+			5 = MOTOR SREDNJA BRZINA
+			6 = MOTOR NAJMANJA BRZINA
+			7 = NE POSTOJI PIN
+			8 = NE POSTOJI PIN
+
+primjer: 	http://soba505.local:8021/sysctrl.cgi?CMD=GET_PINS&ID=200
+
+odgovor: 	Pins States = 00100000
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	GET_TIME
+
+opis:		preuzmi RTC vrijeme sa ESP-a 
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=GET_TIME
+
+odgovor: 	DATE=2025-06-02
+			TIME=15:28:16
+			DAY=Monday
+			EPOCH=1748870896
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	GET_TIMER
+
+opis:		preuzmi postavke timera vanjske rasvjete
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=GET_TIMER
+
+odgovor: 	TIMERON=SUNSET
+			TIMEROFF=SUNRISE
+			ONTIME=0000
+			OFFTIME=0000
+			SUNRISE=05:06
+			SUNSET=20:23
+			Light Relay State : OFF
+			DST=1
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	GET_PINGWDG
+
+opis:		stanje ping watchdog servisa. 
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=GET_PINGWDG
+
+odgovor: 	Ping Watchdog State : ON
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	SET_SSID_PSWRD
+
+opis:		podesi podatke za wifi konekciju. ukoliko je mreža otvorenog 
+			tipa izostavi PSWRD podatak. ovo je komanda za upis parametara
+			wifi konekcije u memoriju i koristiće se od sledećeg restarta
+			tako da je moguće provjeriti upis sa GET_SSID_PSWRD i promjeniti 
+			podatke prije restarta uređaja i gubitka konekcije. 
+			
+
+primjer: 	http://soba505.local:8021/sysctrl.cgi?CMD=SET_SSID_PSWRD&SSID=WiFi0&PSWRD=23456789
+			http://soba505.local:8021/sysctrl.cgi?CMD=SET_SSID_PSWRD&SSID=WiFi0
+
+odgovor: 	WIFI SSID & PASSWORD Setup OK
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	SET_MDNS_NAME
+
+opis:		promjeni multicast DNS ime uređaja. ovo je upis u memoriju
+			novog multicast imena koje će biti validno nakon retarta. 
+			za provjeru upisa koristi GET_MDNS_NAME. zbog keširanja u 
+			ruteru i windosw os stari alias će biti aktivan nekih pola
+			minute do minutu a nakon prvih poziva novog imena će biti
+			izbrisan iz tabela
+
+primjer: 	http://soba505.local:8021/sysctrl.cgi?CMD=SET_MDNS_NAME&MDNS=soba501
+
+odgovor: 	mDNS Setup OK
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	SET_TCPIP_PORT
+
+opis:		promjeni tcp/ip port za pristp uređaju. ovaj port se koristi
+			i za http, mDNS kao i za update. ovo je upis u memoriju koji
+			će se koristiti nakon restarta uređaja tako da se može
+			provjeriti sa GET_TCPIP_PORT prije nego novi port bude validan
+
+primjer: 	http://soba501.local:8021/sysctrl.cgi?CMD=SET_TCPIP_PORT&PORT=8020
+
+odgovor: 	TCP/IP Port Setup OK
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	SET_ROOM_TEMP
+
+opis:		podesi temperaturu sobe. nije bitno da li se adresira kontroler
+			koji je termostat ili proxy kontroler svjetala. zadana temperatura
+			je u opsegu 5 - 40. id kontrolera 1-254
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=SET_ROOM_TEMP&ID=92&VALUE=30
+
+odgovor: 	Temperature set OK
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	SET_GUEST_IN_TEMP
+
+opis:		podesi temperaturu termostata kada se ubaci kartica u odlagač. 
+			bitno je adresirati kontroler sa ulazom za odlagač kartica.
+			zadana temperatura je u opsegu 5 - 40. id kontrolera 1-254
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=SET_GUEST_IN_TEMP&ID=201&VALUE=22
+
+odgovor: 	Temperature set OK
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	SET_GUEST_OUT_TEMP
+
+opis:		podesi temperaturu termostata kada se izvadi kartica iz odlagača. 
+			bitno je adresirati kontroler sa ulazom za odlagač kartica.
+			zadana temperatura je u opsegu 5 - 40. id kontrolera 1-254
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=SET_GUEST_OUT_TEMP&ID=201&VALUE=17
+
+odgovor: 	Temperature set OK
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	SET_THST_HEATING
+
+opis:		podesi termostat na režim grijanja.nije bitno da li se adresira 
+			kontroler koji je termostat ili proxy kontroler svjetala.
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=SET_THST_HEATING&ID=200
+
+odgovor: 	Thermostat set OK
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	SET_THST_COOLING
+
+opis:		podesi termostat na režim hlađenja.nije bitno da li se adresira 
+			kontroler koji je termostat ili proxy kontroler svjetala.
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=SET_THST_COOLING&ID=201
+
+odgovor: 	Thermostat set OK
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	SET_THST_ON
+
+opis:		aktiviraj termostat. slanje ove komande uvijek termostat prebacuje 
+			u mod hlađenja  nebitno da li je termostat isključen ili već radi 
+			u režimu grijanja, tako da je u zimskom periodu potrebno nakon ove
+			komande poslati i SET_THST_HEATING.	nije bitno da li se adresira 
+			kontroler koji je termostat ili proxy kontroler svjetala.
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=SET_THST_ON&ID=201
+
+odgovor: 	Thermostat set OK
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	SET_THST_OFF
+
+opis:		isključi termostat. nije bitno da li se adresira kontroler 
+			koji je termostat ili proxy kontroler svjetala.
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=SET_THST_OFF&ID=200
+
+odgovor: 	Thermostat set OK
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	SET_PIN
+
+opis:		setuj izlazni pin kontrolera u sobi.  koristiti sa oprezom !!!
+			ne postoji nikakav zaštitni mehanizam za kontrolu motora fancoila
+			tako da je moguće ovom komandom uključiti sva tri nammotaja 
+			istovremeno. koristi tabelu iz GET_PINS komande za raspored pinova.
+			bitno je da se adresira ispravan uređaj jer će npr. uključena scena 3
+			kod jednog, neispravnim adresiranjem uključiti namotaj najveće brzine
+			fancoila bez obzira na trenutno stanje kontrole motora.
+			
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=SET_PIN&ID=200&PIN=1&VALUE=1
+
+odgovor: 	Pin Set OK
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	SET_PASSWORD
+
+opis:		piši / briši pinove gostiju. adresira se kontroler ulaza sa čitačem kartica. 
+			iako postoji mogućnost dodavanja ili brisanja do 8 pinova korisnika to 
+			ne treba koristiti zbog  bugova u programu zbog kojih se ti pinovi više 
+			ne mogu jednostavno obrisati nego samo promjeniti ili postaviti na 0. 
+			najbolje je raditi samo sa pinom broj 1 i zbog načina na koji se ispisuje 
+			pin na displeju u meniju "qr kod / pin" kontrolera scena u sobi, gdje je 
+			ispisan samo jedna validan pin gosta nejasnim redoslijedom, ako se doda više 
+			pinova za goste. ispod je primjer za dodavanje i brisanje pina gosta broj 1. 
+			nema komande za provjeru upisanih pinova gostiju  ali ako je došao potvrdan 
+			ogovor na ovu komandu kao odgovor ispod, onda je došao sa adresiranog kontrolera.
+			sigurnosni  mehanizam za upis /brisanje pina može biti slanje 3 uzastopne komande.
+			komanda upisa se sastoji od:
+			G1 			- pin gosta redni broj 1
+			2222 		- pin
+			1030161225	- validnost pina (1030) do sati = 10:30,  (161225) do datuma = 16.12.2025.
+			
+			komanda brisanja:
+			G1X	- briši pin gosta redni broj 1
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=SET_PASSWORD&ID=501&PASSWORD=G1,2222,1030161225
+			http://soba501.local:8020/sysctrl.cgi?CMD=SET_PASSWORD&ID=501&PASSWORD=G1X
+
+odgovor: 	Password set OK
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	RESTART
+
+opis:		restart http_rs485 bridge uređaja sobe (esp-a). nakon promjena
+			postavki potrebno je restartovat uređaj da bi nove postavke 
+			bile validne.
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=RESTART
+
+odgovor: 	Restart in 3s
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	RESTART_CTRL
+
+opis:		restartuj kontroler na rs485 busu. komanda je implementirana
+			samo na kontrolerima u sobi, dok na ulaznim kontolerima nije.
+			
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=RESTART_CTRL&ID=92
+
+odgovor: 	Controler Restart OK
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	SET_TIME
+
+opis:		podesi RTC vrijeme na ESP-a ručno ukoliko nije dostaupan
+			NTP internet servis
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=SET_TIME&DATE=020625&TIME=120000
+
+odgovor: 	RTC Date & Time Set OK.
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	SET_TIMER
+
+opis:		podesi timer vanjske rasvjete. timer ima mogućnost podešavanja vremena 
+			uključenje i isključenja releja rasvjete u svim kombinacijama parametara. ako je 
+			jedan parametar OFF a drugi podešen onda se stalno aktivira taj koji je podešen.
+			ako je timer podešen provjera se vrši svake minute. omogućen je override timera 
+			ručnim komandama kada relej rasvjete ostaje podešen do sledećeg događaja timera
+			kada se kontrola ponovo vraća na timer. npr. uključeno svjetlo prije vremena
+			timera ostaje uključeno do timeroff vremena ako je podešeno. u slučaju restarta
+			provjerava se stanje postavki timera te se shodno setuje / resetuje relej
+			dok ručno podešeno stanje više ne vrijedi. pin D32 je relej vanjske rasvjete.
+			parametri timera:
+			0000 do 2359 kao vrijeme od 00:00 do 23:59
+			OFF kao isključen 
+			SUNRISE izlazak sunca u Sarajevu
+			SUNSET  zalazak sunca u Sarajevu
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=SET_TIMER&TIMERON=SUNSET&TIMEROFF=SUNRISE
+			http://soba501.local:8020/sysctrl.cgi?CMD=SET_TIMER&TIMERON=2030&TIMEROFF=0630
+			http://soba501.local:8020/sysctrl.cgi?CMD=SET_TIMER&TIMERON=OFF&TIMEROFF=OFF
+
+odgovor: 	Timer Set OK
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	OUTDOOR_LIGHT_ON
+
+opis:		override timera - uključenje releja rasvjete. u svakom trenutku 
+			se može poslati komanda za promjenu stanja izlaza i ona važi do 
+			sledećeg događaja timera ako je timer podešen. pin D32 je relej
+			vanjske rasvjete
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=OUTDOOR_LIGHT_ON
+
+odgovor: 	Outdoor Lights Set: ON
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	OUTDOOR_LIGHT_OFF
+
+opis:		override timera - isključenje releja rasvjete. u svakom trenutku 
+			se može poslati komanda za promjenu stanja izlaza i ona važi do 
+			sledećeg događaja timera ako je timer podešen. pin D32 je relej
+			vanjske rasvjete
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=OUTDOOR_LIGHT_OFF
+
+odgovor: 	Outdoor Lights Set: OFF
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	PINGWDG_ON
+
+opis:		omogući ping google servera svakih 60s, nakon 10 propalih
+			pokušaja uređaj se restartuje.
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=PINGWDG_ON
+
+odgovor: 	Ping Watchdog State : ON
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	PINGWDG_OFF
+
+opis:		onemogući ping watchdog ako mreža nema pritup internetu
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=PINGWDG_OFF
+
+odgovor: 	Ping Watchdog State : OFF
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	TH_STATUS
+
+opis:		preuzmi postavke termostata na ESP modulu. onewire senzor
+			temperature je DS18B20 na pinu D5. može se koristi dodatni 
+			DS18B20 senzor na pinu D18 za očitanje temperature fluida
+			ventilator 1 brzina je na pinu D25, srednja na D26 i D27
+			je najbrža, ventil fancoila ili pumpa je na pinu D33 
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=TH_STATUS
+
+odgovor: 	Temp=26.0*C
+			Setpoint=20.0*C
+			Diff=0.5*C
+			Mode=COOLING
+			FC Pump / Valve=ON
+			Floor Pump=OFF
+			Fan=HIGH
+			EMA=0.5
+			Fluid=25.8*C
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	TH_SETPOINT
+
+opis:		podesi setpoint termostata na ESP modulu
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=TH_SETPOINT&VALUE=24
+
+odgovor: 	Thermostat Setpoint set to 22.00
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	TH_DIFF
+
+opis:		podesi diferencu termostata na ESP modulu u decimalnom formatu
+			od 1 do 50 što predstavlja vrijednost diference od 0.1*C do 5.0*C 
+			ova diferenca se višekratnikom prenosi na sve brzine ventilatora. 
+			npr. kod hlađenja podešena diferenca je 
+			temperatura > setpoint + diferenca 		=> 1. BRZINA
+			temperatura > setpoint + diferenca * 2 	=> 2. BRZINA
+			temperatura > setpoint + diferenca * 3 	=> 3. BRZINA
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=TH_DIFF&VALUE=5
+
+odgovor: 	Thermostat Difference set to 0.5*C
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	TH_HEATING
+
+opis:		uključi termostat na ESP modulu u modu grijanja
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=TH_HEATING
+
+odgovor: 	Mode set to HEATING
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	TH_COOLING
+
+opis:		uključi termostat na ESP modulu u modu hlađenja 
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=TH_COOLING
+
+odgovor: 	Mode set to COOLING
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	TH_ON
+
+opis:		uključi termostat na ESP modulu u zadnjem odabranom modu rada
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=TH_ON
+
+odgovor: 	Thermostat resumed, mode: COOLING
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	TH_OFF
+
+opis:		isključi termostat na ESP modulu
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=TH_OFF
+
+odgovor: 	Thermostat turned OFF
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	TH_EMA
+
+opis:		podesi EMA (Exponential Moving Average) filter mjerene temperature.
+			vrijednost filtera je od 1 do 10 t.j. 0.1 do 1.0 prema sledećem:
+			manji alpha = glađa, sporija reakcija, veći alpha = brža reakcija.
+			Za sobu od 20-50 m², sa temperaturom koja se ne mijenja naglo 
+			fiksni update = 10 sekundi + alpha = 0.5 je optimalno
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=TH_EMA&VALUE=5
+
+odgovor: 	EMA filter set to 0.5
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	ESP_GET_PINS
+
+opis:		stanje slobodnih pinova na ESP modulu. pinovi koji su 
+			izlistani u odgovoru su pinovi koji nisu zauzeti firmawereom
+			i mogu se slobodno koristiti. nakon svakog restarta svi pinovi
+			su ulazni. ako se jednom poošalje bilo koja od komandi za 
+			set/resetovanje pina uključuje se izlazni driver pina i pin 
+			je do restarta izlazni. ovaj ispis daje trenutno stanje pina
+			GPIO34, GPIO35, GPIO36 su input_only pinovi i nije ih moguće
+			postaviti kao izlazne.
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=ESP_GET_PINS
+
+odgovor: 	GPIO12=LOW
+			GPIO13=LOW
+			GPIO14=LOW
+			GPIO15=HIGH
+			GPIO19=LOW
+			GPIO21=LOW
+			GPIO22=LOW
+			GPIO34=LOW
+			GPIO35=LOW
+			GPIO36=LOW
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	ESP_SET_PIN
+
+opis:		setuj slobodan pin (HIGH) na ESP modulu. pin mora biti validan
+			i raspoloživ t.j. neki od izlistanih u ESP_GET_PINS komandi
+			GPIO34, GPIO35, GPIO36 su input_only pinovi i nije ih moguće
+			postaviti kao izlazne. ako se jednom poošalje ova komanda za 
+			neki pin taj pin je do restarta izlazni. 
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=ESP_SET_PIN&PIN=22
+
+odgovor: 	PIN set HIGH
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	ESP_RESET_PIN
+
+opis:		resetuj slobodan pin (LOW) na ESP modulu. pin mora biti validan
+			i raspoloživ t.j. neki od izlistanih u ESP_GET_PINS komandi
+			GPIO34, GPIO35, GPIO36 su input_only pinovi i nije ih moguće
+			postaviti kao izlazne.  ako se jednom poošalje ova komanda za 
+			neki pin taj pin je do restarta izlazni. 
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=ESP_RESET_PIN&PIN=22
+
+odgovor: 	PIN set LOW
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	ESP_PULSE_PIN
+
+opis:		puls na slobodnom pinu (HIGH -> pauza -> LOW) na ESP modulu. 
+			pin mora biti validan i raspoloživ t.j. neki od  izlistanih 
+			u ESP_GET_PINS ili GET_STATUS komandi. parametar PAUSE je
+			opcionalan i ako je izostavljen podrazumjeva se 2 sekunde.
+			korisno za rampe, kapije, žaluzine. parametar PAUSE je u opsegu
+			od 1 sekunde do  86400 sekundi (1 dana). GPIO34, GPIO35, GPIO36 
+			su input_only pinovi i nije ih moguće postaviti kao izlazne.
+			ako se jednom poošalje ova komanda za neki pin, taj pin je 
+			do restarta izlazni. 
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=ESP_PULSE_PIN&PIN=22
+			http://soba501.local:8020/sysctrl.cgi?CMD=ESP_PULSE_PIN&PIN=22&PAUSE=10
+
+odgovor: 	PIN Puslsed
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------

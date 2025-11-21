@@ -90,6 +90,36 @@
         border-radius: 50%; object-fit: cover; 
       }
 
+      /* --- Alexa Uputstva Stilovi --- */
+      #alexa-instructions-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.7);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 1000;
+        opacity: 1;
+        transition: opacity 0.3s ease;
+        padding: 1rem;
+      }
+      #alexa-instructions-overlay.hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+      #alexa-instructions-overlay article {
+        max-width: 500px;
+        width: 100%;
+        text-align: center;
+      }
+      #alexa-instructions-overlay p {
+        font-size: 1.1rem;
+        line-height: 1.6;
+      }
+
       /* --- Media Query --- */
       @media (max-width: 500px) {
         main { margin: 0.5rem; padding: 0.5rem; }
@@ -152,24 +182,34 @@
           </label>
 
           <label for="switch-3">
-            <span><i class="bi bi-lightbulb-fill"></i><span data-translate-key="light_krevet">Krevet</span></span>
+            <span><i class="bi bi-usb-mini"></i><span data-translate-key="light_krevet">Krevet</span></span>
             <input type="checkbox" id="switch-3" name="switch-3" role="switch" data-device="light_krevet">
           </label>
           
           <label for="switch-4">
-            <span><i class="bi bi-display"></i><span data-translate-key="light_wc">WC</span></span>
+            <span><i class="bi bi-sun"></i><span data-translate-key="light_wc">WC</span></span>
             <input type="checkbox" id="switch-4" name="switch-4" role="switch" data-device="light_wc">
           </label>
 
           <label for="switch-5">
-            <span><i class="bi bi-brightness-high"></i><span data-translate-key="light_ogledalo">Ogledalo</span></span>
+            <span><i class="bi bi-vinyl"></i><span data-translate-key="light_ogledalo">Ogledalo</span></span>
             <input type="checkbox" id="switch-5" name="switch-5" role="switch" data-device="light_ogledalo">
           </label>
           
         </div>
       </article>
 
+      <div id="alexa-instructions-overlay" class="hidden">
+        <article>
+          <h4 data-translate-key="alexa_title"></h4>
+          <p data-translate-key="alexa_instructions"></p>
+        </article>
+      </div>
+
       <div class="language-switcher">
+        <button id="alexa-btn" class="lang-btn">
+          <img src="/static/icons_menu_alexa.png" alt="Alexa Uputstva">
+        </button>
         <button class="lang-btn" data-lang="bhs">
           <img src="/static/icons_menu_language_bhsc.png" alt="BHS Jezici">
         </button>
@@ -188,23 +228,29 @@
       // JAVASCRIPT (Verzija 8.4 - Granulacija 1.0°C)
       // --------------------------------------------------------
 
-      // --- 1. RJEČNIK ZA PREVODE (Isti) ---
+      // --- 1. RJEČNIK ZA PREVODE ---
       const translations = {
         bhs: {
           page_title: "Kontrola Sobe", title: "Kontrola Sobe", thermostat_title: "Temperatura", controls_title: "Kontrole",
-          light_luster: "Luster", light_ambient: "Ambient", light_krevet: "Krevet", light_wc: "WC", light_ogledalo: "Ogledalo"
+          light_luster: "Luster", light_ambient: "Ambient", light_krevet: "Krevet", light_wc: "WC", light_ogledalo: "Ogledalo",
+          alexa_title: "Alexa Glasovne Komande",
+          alexa_instructions: "Dragi gosti, u sobi se nalazi glasovni asistent Alexa kojim možete kontrolisati uređaje. Dovoljno je da ga pozovete sa \"ALEXA !!!\" i kažete komandu. Primjeri:\n\"Alexa, Switch On Chandelier\", \"Alexa, Switch Off Chandelier\"\n\"Alexa, Switch On Ambient Light\", \"Alexa, Switch Off Ambient Light\"\n\"Alexa, Switch On Bed Light\", \"Alexa, Switch Off Bed Light\"\n\"Alexa, Switch On WC Light\", \"Alexa, Switch Off WC Light\"\n\"Alexa, Switch On Mirror Light\", \"Alexa, Switch Off Mirror Light\"\n\"Alexa, Switch On All Lights\", \"Alexa, Switch Off All Lights\"\n\"Alexa, Set Thermostat to Twenty-Two\"."
         },
         eng: {
           page_title: "Room Control", title: "Room Control", thermostat_title: "Temperature", controls_title: "Controls",
-          light_luster: "Chandelier", light_ambient: "Ambient", light_krevet: "Bed Light", light_wc: "WC Light", light_ogledalo: "Mirror Light"
+          light_luster: "Chandelier", light_ambient: "Ambient", light_krevet: "Bed Light", light_wc: "WC Light", light_ogledalo: "Mirror Light",
+          alexa_title: "Alexa Voice Commands",
+          alexa_instructions: "Dear guests, this room is equipped with an Alexa voice assistant with which you can control devices. Simply call it with \"ALEXA !!!\" and say a command. Examples:\n\"Alexa, Switch On Chandelier\", \"Alexa, Switch Off Chandelier\"\n\"Alexa, Switch On Ambient Light\", \"Alexa, Switch Off Ambient Light\"\n\"Alexa, Switch On Bed Light\", \"Alexa, Switch Off Bed Light\"\n\"Alexa, Switch On WC Light\", \"Alexa, Switch Off WC Light\"\n\"Alexa, Switch On Mirror Light\", \"Alexa, Switch Off Mirror Light\"\n\"Alexa, Switch On All Lights\", \"Alexa, Switch Off All Lights\"\n\"Alexa, Set Thermostat to Twenty-Two\"."
         },
         de: {
           page_title: "Raumsteuerung", title: "Raumsteuerung", thermostat_title: "Temperatur", controls_title: "Steuerung",
-          light_luster: "Kronleuchter", light_ambient: "Ambiente", light_krevet: "Bettlicht", light_wc: "WC-Licht", light_ogledalo: "Spiegellicht"
+          light_luster: "Kronleuchter", light_ambient: "Ambiente", light_krevet: "Bettlicht", light_wc: "WC-Licht", light_ogledalo: "Spiegellicht",
+          alexa_title: "Alexa Sprachbefehle",
+          alexa_instructions: "Liebe Gäste, dieses Zimmer ist mit einem Alexa-Sprachassistenten ausgestattet, mit dem Sie Geräte steuern können. Rufen Sie ihn einfach mit \"ALEXA !!!\" auf und sagen Sie einen Befehl. Beispiele:\n\"Alexa, Switch On Chandelier\", \"Alexa, Switch Off Chandelier\"\n\"Alexa, Switch On Ambient Light\", \"Alexa, Switch Off Ambient Light\"\n\"Alexa, Switch On Bed Light\", \"Alexa, Switch Off Bed Light\"\n\"Alexa, Switch On WC Light\", \"Alexa, Switch Off WC Light\"\n\"Alexa, Switch On Mirror Light\", \"Alexa, Switch Off Mirror Light\"\n\"Alexa, Switch On All Lights\", \"Alexa, Switch Off All Lights\"\n\"Alexa, Set Thermostat to Twenty-Two\"."
         }
       };
 
-      // --- 2. GLOBALNE VARIJABLE I STANJE (Isto) ---
+      // --- 2. GLOBALNE VARIJABLE I STANJE ---
       let state = {
         currentTemp: 22.0,
       };
@@ -215,9 +261,11 @@
       const tempVrijednost = document.getElementById('temp-vrijednost');
       const currentTempDisplay = document.getElementById('current-temp-display');
       const allSwitches = document.querySelectorAll('.switch-list-container input[role="switch"]');
-      const langButtons = document.querySelectorAll('.lang-btn');
+      const langButtons = document.querySelectorAll('.lang-btn[data-lang]');
+      const alexaBtn = document.getElementById('alexa-btn');
+      const alexaOverlay = document.getElementById('alexa-instructions-overlay');
 
-      // --- 3. LOGIKA ZA PREVODE (Ista) ---
+      // --- 3. LOGIKA ZA PREVODE I UI ---
       function setLanguage(lang) {
         if (!translations[lang]) return;
         
@@ -240,6 +288,15 @@
         button.addEventListener('click', () => {
           setLanguage(button.dataset.lang);
         });
+      });
+
+      alexaBtn.addEventListener('click', () => {
+        alexaOverlay.classList.toggle('hidden');
+      });
+      alexaOverlay.addEventListener('click', (e) => {
+        if (e.target === alexaOverlay) {
+          alexaOverlay.classList.add('hidden');
+        }
       });
 
       // --- 4. GLAVNA LOGIKA (SLANJE I PRIMANJE) ---

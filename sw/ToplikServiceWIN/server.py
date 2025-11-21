@@ -273,6 +273,7 @@ def api_control():
         # --- SIGURNOSNI BLOK (Faza 6.2) ---
         soba_id = soba_data.get('soba_id')
         pin_iz_tokena = soba_data.get('guest_pin')
+        is_manager_access = soba_data.get('is_manager_access', False)
         if not pin_iz_tokena:
             return jsonify({'success': False, 'message': 'Neispravan token (nedostaje pin). Prijavite se ponovo.'}), 401
 
@@ -280,7 +281,7 @@ def api_control():
             if not soba_id or soba_id not in CONFIG['sobe']:
                 return jsonify({'success': False, 'message': 'Konfiguracija sobe nije pronađena.'}), 500
             trenutni_guest_pin = CONFIG['sobe'][soba_id].get('guest_pin')
-            if trenutni_guest_pin != pin_iz_tokena:
+            if not is_manager_access and trenutni_guest_pin != pin_iz_tokena:
                 logging.warning(f"ODBIJENO: Token za sobu {soba_id} je nevažeći (PIN promijenjen). Korisnik izbačen.")
                 return jsonify({'success': False, 'message': 'PIN za sobu je promijenjen. Molimo prijavite se ponovo.'}), 401
         # --- KRAJ SIGURNOSNOG BLOKA ---
@@ -327,6 +328,13 @@ def provjeri_admin_token(token):
         return data.get('tip') == 'admin'
     except: return False
 
+def provjeri_manager_token(token):
+    if not token: return False
+    try:
+        data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+        return data.get('tip') == 'manager'
+    except: return False
+
 @app.route('/admin')
 def admin_login_page():
     return render_template('admin_login.html')
@@ -368,6 +376,74 @@ def api_admin_login():
     else:
         logging.warning("NEUSPJEŠAN LOGIN: Pogrešna admin lozinka.")
         return jsonify({'success': False, 'message': 'Pogrešna lozinka'}), 401
+# ----------------------------------------------------------------------
+#  MANAGER RUTE
+# ----------------------------------------------------------------------
+@app.route('/manager')
+def manager_login_page():
+    return render_template('manager_login.html')
+
+@app.route('/api/manager/login', methods=['POST'])
+def api_manager_login():
+    data = request.json
+    pin = data.get('pin')
+    if not pin:
+        return jsonify({'success': False, 'message': 'PIN nije poslan'}), 400
+    
+    with config_lock:
+        manager_pin = CONFIG.get('manager_pin')
+
+    if pin == manager_pin:
+        token_payload = { 'tip': 'manager', 'exp': datetime.utcnow() + timedelta(hours=8) }
+        token = jwt.encode(token_payload, app.config['SECRET_KEY'], algorithm='HS256')
+        response = make_response(jsonify({'success': True}))
+        response.set_cookie('manager_token', token, httponly=True, samesite='Strict', max_age=28800)
+        logging.info("USPJEŠAN LOGIN: Manager se prijavio.")
+        return response
+    else:
+        logging.warning("NEUSPJEŠAN LOGIN: Pogrešan manager PIN.")
+        return jsonify({'success': False, 'message': 'Pogrešan PIN'}), 401
+
+@app.route('/manager/dashboard')
+def manager_dashboard():
+    if not provjeri_manager_token(request.cookies.get('manager_token')):
+        return redirect(url_for('manager_login_page'))
+    
+    with config_lock:
+        sobe_za_managera = {}
+        for soba_id, data in CONFIG.get('sobe', {}).items(): 
+            sobe_za_managera[soba_id] = { 
+                "ime": data.get('ime'),
+                "mdns": data.get('mdns'),
+                "port": data.get('port')
+            }
+    return render_template('manager.html', sobe=sobe_za_managera)
+
+@app.route('/manager/soba/<soba_id>')
+def manager_soba_redirect(soba_id):
+    if not provjeri_manager_token(request.cookies.get('manager_token')):
+        return redirect(url_for('manager_login_page'))
+
+    with config_lock:
+        if soba_id not in CONFIG['sobe']:
+            return jsonify({'success': False, 'message': 'Soba nije pronađena'}), 404
+        soba_config = CONFIG['sobe'][soba_id]
+        
+        token_payload = {
+            'soba_id': soba_id, 
+            'guest_pin': soba_config['guest_pin'], 
+            'mdns': soba_config['mdns'],
+            'port': soba_config['port'],
+            'tip': 'gost',
+            'is_manager_access': True, # Oznaka za managerski pristup
+            'exp': datetime.utcnow() + timedelta(minutes=30) # Kratkotrajni token
+        }
+        token = jwt.encode(token_payload, app.config['SECRET_KEY'], algorithm='HS256')
+        
+        response = make_response(redirect(url_for('soba_page')))
+        response.set_cookie('token', token, httponly=True, samesite='Strict', max_age=1800) # 30 min
+        logging.info(f"MANAGER PRISTUP: Manager dobio token za sobu {soba_id}")
+        return response
 
 @app.route('/api/admin/get_status', methods=['POST'])
 def api_admin_get_status():
@@ -496,6 +572,7 @@ def api_get_guest_status():
 
         soba_id = soba_data.get('soba_id')
         pin_iz_tokena = soba_data.get('guest_pin')
+        is_manager_access = soba_data.get('is_manager_access', False)
         if not pin_iz_tokena:
             return jsonify({'success': False, 'message': 'Neispravan token (nedostaje pin). Prijavite se ponovo.'}), 401
 
@@ -503,7 +580,7 @@ def api_get_guest_status():
             if not soba_id or soba_id not in CONFIG['sobe']:
                 return jsonify({'success': False, 'message': 'Konfiguracija sobe nije pronađena.'}), 500
             trenutni_guest_pin = CONFIG['sobe'][soba_id].get('guest_pin')
-            if trenutni_guest_pin != pin_iz_tokena:
+            if not is_manager_access and trenutni_guest_pin != pin_iz_tokena:
                 logging.warning(f"ODBIJENO (STATUS): Token za sobu {soba_id} je nevažeći (PIN promijenjen). Korisnik izbačen.")
                 return jsonify({'success': False, 'message': 'PIN za sobu je promijenjen. Molimo prijavite se ponovo.'}), 401
             
@@ -597,6 +674,86 @@ def api_get_guest_status():
 # ----------------------------------------------------------------------
 #  FUNKCIJE ZA EKSTERNI API (PIN SYNC)
 # ----------------------------------------------------------------------
+@app.route('/api/manager/heating_control', methods=['POST'])
+def api_manager_heating_control():
+    if not provjeri_manager_token(request.cookies.get('manager_token')):
+        return jsonify({'success': False, 'message': 'Niste prijavljeni'}), 401
+    
+    data = request.json
+    uredjaj = data.get('uredjaj')
+    vrijednost = data.get('vrijednost')
+
+    with config_lock:
+        manager_devices = CONFIG.get('manager_devices', {})
+        
+        device_config = None
+        soba_id = None
+        params = {}
+
+        if uredjaj == 'fitness_thermostat_setpoint':
+            device_config = manager_devices.get('fitness_thermostat', {})
+            soba_id = device_config.get('mdns_soba_id')
+            params = device_config.get('commands', {}).get('set_temp', {}).copy()
+            if params:
+                params['VALUE'] = str(int(vrijednost))
+            else:
+                return jsonify({'success': False, 'message': 'Komanda za setpoint termostata nije konfigurirana.'}), 500
+        
+        elif uredjaj == 'fitness_thermostat_on_off':
+            device_config = manager_devices.get('fitness_thermostat', {})
+            soba_id = device_config.get('mdns_soba_id')
+            if vrijednost: # ON
+                params = device_config.get('commands', {}).get('turn_on', {}).copy()
+            else: # OFF
+                params = device_config.get('commands', {}).get('turn_off', {}).copy()
+            if not params:
+                return jsonify({'success': False, 'message': 'Komanda za ON/OFF termostata nije konfigurirana.'}), 500
+
+        elif uredjaj == 'fitness_thermostat_mode':
+            device_config = manager_devices.get('fitness_thermostat', {})
+            soba_id = device_config.get('mdns_soba_id')
+            if vrijednost: # HEATING
+                params = device_config.get('commands', {}).get('set_heating', {}).copy()
+            else: # COOLING
+                params = device_config.get('commands', {}).get('set_cooling', {}).copy()
+            if not params:
+                return jsonify({'success': False, 'message': 'Komanda za mod termostata nije konfigurirana.'}), 500
+
+        elif uredjaj == 'pumpa_fancoil':
+            device_config = manager_devices.get('pumpa_fancoil', {})
+            soba_id = device_config.get('mdns_soba_id')
+            if vrijednost: # ON
+                params = device_config.get('command_on', {}).copy()
+            else: # OFF
+                params = device_config.get('command_off', {}).copy()
+            if not params:
+                return jsonify({'success': False, 'message': 'Komanda za fancoil pumpu nije konfigurirana.'}), 500
+
+        elif uredjaj == 'pumpa_podno':
+            device_config = manager_devices.get('pumpa_podno', {})
+            soba_id = device_config.get('mdns_soba_id')
+            if vrijednost: # ON
+                params = device_config.get('command_on', {}).copy()
+            else: # OFF
+                params = device_config.get('command_off', {}).copy()
+            if not params:
+                return jsonify({'success': False, 'message': 'Komanda za podnu pumpu nije konfigurirana.'}), 500
+        
+        else:
+            return jsonify({'success': False, 'message': f'Uređaj "{uredjaj}" nije podržan za kontrolu.'}), 400
+
+    if not soba_id:
+        return jsonify({'success': False, 'message': f'Soba ID za uređaj "{uredjaj}" nije definiran u konfiguraciji.'}), 500
+    if not params:
+        return jsonify({'success': False, 'message': f'Komanda za uređaj "{uredjaj}" nije ispravno formirana.'}), 500
+    
+    response, message = send_esp_command(soba_id, params)
+    
+    if response and response.ok:
+        return jsonify({'success': True, 'message': 'Komanda poslana'})
+    else:
+        return jsonify({'success': False, 'message': message}), 500
+
 def sync_pin_on_server_and_device(room_id, new_pin):
     with config_lock:
         if room_id not in CONFIG['sobe']:
@@ -772,8 +929,174 @@ def api_admin_esp_pin_control():
         return jsonify({'success': False, 'message': message})
 
 # ----------------------------------------------------------------------
-#  NOVO: API RUTA ZA PROMJENU PINA (ADMIN)
+#  MANAGER API RUTE
 # ----------------------------------------------------------------------
+@app.route('/api/manager/outdoor_light_status')
+def api_manager_outdoor_light_status():
+    if not provjeri_manager_token(request.cookies.get('manager_token')):
+        return jsonify({'success': False, 'message': 'Niste prijavljeni'}), 401
+
+    outdoor_light_on = False
+    with config_lock:
+        outdoor_config = CONFIG.get('manager_devices', {}).get('vanjska_rasvjeta', {})
+        soba_ids = outdoor_config.get('mdns_soba_ids', [])
+        
+    for soba_id in soba_ids:
+        # Prvo provjeravamo da li soba ID postoji
+        with config_lock:
+            if soba_id not in CONFIG['sobe']:
+                logging.warning(f"MANAGER OUTDOOR: Soba ID {soba_id} za vanjsku rasvjetu nije u CONFIG-u.")
+                continue
+
+        # Dohvaćanje statusa
+        params = {'CMD': 'GET_STATUS'}
+        response, message = send_esp_command(soba_id, params, timeout=2) # Kraći timeout za status
+
+        if response and response.ok:
+            parsed_data = parse_get_status(response.text)
+            if parsed_data.get('light_relay_state') == 'ON':
+                outdoor_light_on = True
+                break # Ako je jedno upaljeno, cijela rasvjeta je "ON"
+        else:
+            logging.warning(f"MANAGER OUTDOOR: Nije uspjelo dohvaćanje statusa za sobu {soba_id}. Greška: {message}")
+            
+    return jsonify({'success': True, 'status': 'on' if outdoor_light_on else 'off'})
+
+@app.route('/api/manager/toggle_outdoor_light', methods=['POST'])
+def api_manager_toggle_outdoor_light():
+    if not provjeri_manager_token(request.cookies.get('manager_token')):
+        return jsonify({'success': False, 'message': 'Niste prijavljeni'}), 401
+    
+    data = request.json
+    state = data.get('state') # 'on' or 'off'
+
+    if state not in ['on', 'off']:
+        return jsonify({'success': False, 'message': 'Neispravno stanje (očekuje se "on" ili "off")'}), 400
+
+    with config_lock:
+        outdoor_config = CONFIG.get('manager_devices', {}).get('vanjska_rasvjeta', {})
+        soba_ids = outdoor_config.get('mdns_soba_ids', [])
+        command_params = outdoor_config.get(f'command_{state}')
+
+    if not command_params:
+        return jsonify({'success': False, 'message': f'Komanda za stanje "{state}" nije definirana u config.json'}), 500
+
+    successful_commands = []
+    failed_commands = []
+
+    for soba_id in soba_ids:
+        # Prvo provjeravamo da li soba ID postoji
+        with config_lock:
+            if soba_id not in CONFIG['sobe']:
+                logging.warning(f"MANAGER OUTDOOR TOGGLE: Soba ID {soba_id} za vanjsku rasvjetu nije u CONFIG-u.")
+                failed_commands.append(f"Soba {soba_id}: Nije pronađena u konfiguraciji.")
+                continue
+
+        response, message = send_esp_command(soba_id, command_params, timeout=3)
+        if response and response.ok:
+            successful_commands.append(soba_id)
+        else:
+            failed_commands.append(f"Soba {soba_id}: {message}")
+            logging.error(f"MANAGER OUTDOOR TOGGLE: Neuspjela komanda za sobu {soba_id}. Greška: {message}")
+
+    if not failed_commands:
+        return jsonify({'success': True, 'message': f'Uspješno poslana komanda "{state}" na {len(successful_commands)} uređaja.'})
+    elif len(successful_commands) > 0:
+        return jsonify({'success': False, 'message': f'Komanda poslana na {len(successful_commands)} uređaja, ali neuspjela na {len(failed_commands)}. Detalji: {"; ".join(failed_commands)}'}), 500
+    else:
+        return jsonify({'success': False, 'message': f'Komanda "{state}" nije uspjela ni na jednom uređaju. Detalji: {"; ".join(failed_commands)}'}), 500
+
+@app.route('/manager/heating')
+def manager_heating_page():
+    if not provjeri_manager_token(request.cookies.get('manager_token')):
+        return redirect(url_for('manager_login_page'))
+    return render_template('manager_heating.html')
+
+@app.route('/api/manager/heating_status')
+def api_manager_heating_status():
+    if not provjeri_manager_token(request.cookies.get('manager_token')):
+        return jsonify({'success': False, 'message': 'Niste prijavljeni'}), 401
+
+    final_status = {
+        'currentTemp': 22.0,
+        'setpoint': 22.0,
+        'isThermostatOn': False,
+        'isHeatingMode': False, # true for heating, false for cooling
+        'pumpaFancoilOn': False,
+        'pumpaPodnoOn': False
+    }
+
+    with config_lock:
+        manager_devices = CONFIG.get('manager_devices', {})
+        fitness_thermostat_config = manager_devices.get('fitness_thermostat', {})
+        pumpa_fancoil_config = manager_devices.get('pumpa_fancoil', {})
+        pumpa_podno_config = manager_devices.get('pumpa_podno', {})
+
+    thermostat_soba_id = fitness_thermostat_config.get('mdns_soba_id')
+    fancoil_soba_id = pumpa_fancoil_config.get('mdns_soba_id')
+    podno_soba_id = pumpa_podno_config.get('mdns_soba_id')
+
+    # Status termostata
+    if thermostat_soba_id:
+        # GET_ROOM_TEMP
+        params_temp = {'CMD': 'GET_ROOM_TEMP', 'ID': fitness_thermostat_config.get('commands', {}).get('set_temp', {}).get('ID')}
+        r_temp, msg_temp = send_esp_command(thermostat_soba_id, params_temp, timeout=3)
+        if r_temp and r_temp.ok:
+            temp_match = re.search(r'Room Temperature = (\d+\.?\d*)', r_temp.text)
+            set_match = re.search(r'Setpoint Temperature = (\d+\.?\d*)', r_temp.text)
+            if temp_match: final_status['currentTemp'] = float(temp_match.group(1))
+            if set_match: final_status['setpoint'] = float(set_match.group(1))
+        
+        # TH_STATUS
+        params_status = {'CMD': 'TH_STATUS'}
+        r_status, msg_status = send_esp_command(thermostat_soba_id, params_status, timeout=3)
+        if r_status and r_status.ok:
+            mode_match = re.search(r'Mode=([A-Z]+)', r_status.text)
+            thermostat_on_match = re.search(r'State=(ON|OFF)', r_status.text)
+            
+            if mode_match:
+                mode = mode_match.group(1)
+                if mode == 'HEATING': final_status['isHeatingMode'] = True
+                elif mode == 'COOLING': final_status['isHeatingMode'] = False
+            
+            if thermostat_on_match:
+                final_status['isThermostatOn'] = (thermostat_on_match.group(1) == 'ON')
+        
+    # Status pumpi (pretpostavljamo da su na istoj sobi kao termostat za jednostavnost, ako ne, pošalji zasebno)
+    if fancoil_soba_id and fancoil_soba_id == thermostat_soba_id: # Optimizacija: ako je ista soba, šalji samo jedan GET_PINS
+        pins_to_check = []
+        if pumpa_fancoil_config.get('command_on', {}).get('PIN'):
+            pins_to_check.append(pumpa_fancoil_config['command_on']['PIN'])
+        if pumpa_podno_config.get('command_on', {}).get('PIN'):
+            pins_to_check.append(pumpa_podno_config['command_on']['PIN'])
+
+        if pins_to_check:
+            # Dohvati pin_controller ID za sobu501 iz configa
+            pin_controller_id = None
+            with config_lock:
+                soba_501_config = CONFIG['sobe'].get(fancoil_soba_id)
+                if soba_501_config:
+                    pin_controller_id = soba_501_config.get('uredjaji', {}).get('pin_controller', {}).get('ID')
+            
+            if not pin_controller_id:
+                logging.warning(f"MANAGER HEATING STATUS: Nije pronađen 'pin_controller' ID za sobu {fancoil_soba_id}. Ne mogu dohvatiti status pumpi.")
+            else:
+                params_pins = {'CMD': 'GET_PINS', 'ID': pin_controller_id} 
+                r_pins, msg_pins = send_esp_command(fancoil_soba_id, params_pins, timeout=3)
+                if r_pins and r_pins.ok:
+                    pins_states_str = parse_get_pins_response(r_pins.text)
+                    if pins_states_str:
+                        if pumpa_fancoil_config.get('command_on', {}).get('PIN'):
+                            pin_num = int(pumpa_fancoil_config['command_on']['PIN'])
+                            if pin_num > 0 and pin_num <= len(pins_states_str):
+                                final_status['pumpaFancoilOn'] = (pins_states_str[pin_num-1] == '1')
+                        if pumpa_podno_config.get('command_on', {}).get('PIN'):
+                            pin_num = int(pumpa_podno_config['command_on']['PIN'])
+                            if pin_num > 0 and pin_num <= len(pins_states_str):
+                                final_status['pumpaPodnoOn'] = (pins_states_str[pin_num-1] == '1')
+    
+# ----------------------------------------------------------------------
+#  NOVO: API RUTA ZA PROMJENU PINA (ADMIN)
 @app.route('/api/admin/change_pin', methods=['POST'])
 def api_admin_change_pin():
     """API za promjenu PIN-a pozvan iz Admin Dashboarda."""

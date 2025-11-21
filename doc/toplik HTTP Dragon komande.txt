@@ -1,0 +1,93 @@
+
+PRISTUP IZVAN LAN-a
+---------------------------------------------------------------------
+http://toplik.ddns.net:8020/index.shtml
+http://toplik.ddns.net:8021/index.shtml
+
+
+
+STANJE RELEJNIH IZLAZA (NA EXPANDERU)
+---------------------------------------------------------------------
+http://toplik.ddns.net:8020 nema relej expander
+http://toplik.ddns.net:8021/sysctrl.cgi?RELAY=17&STATE=1
+
+
+
+
+PODEŠAVANJE RELEJNIH IZLAZA (NA EXPANDERU)
+---------------------------------------------------------------------
+http://toplik.ddns.net:8020 nema relej expander
+http://toplik.ddns.net:8021/sysctrl.cgi?RELAY=17&VALUE=0
+
+
+
+STANJE DIGITALNIH IZLAZA (NA DRAGONU)
+---------------------------------------------------------------------
+http://toplik.ddns.net:8020/sysctrl.cgi?CMD=DOUTSTATE&ADDRESS=1
+http://toplik.ddns.net:8021/sysctrl.cgi?CMD=DOUTSTATE&ADDRESS=1
+
+
+
+SETOVANJE DIGITALNIH IZLAZA (NA DRAGONU)
+---------------------------------------------------------------------
+http://toplik.ddns.net:8020/sysctrl.cgi?CMD=DOUTSET&ADDRESS=1
+http://toplik.ddns.net:8021/sysctrl.cgi?CMD=DOUTSET&ADDRESS=1
+
+
+
+RESETOVANJE DIGITALNIH IZLAZA (NA DRAGONU)
+---------------------------------------------------------------------
+http://toplik.ddns.net:8020/sysctrl.cgi?CMD=DOUTRESET&ADDRESS=1
+http://toplik.ddns.net:8021/sysctrl.cgi?CMD=DOUTRESET&ADDRESS=1
+
+
+PODEŠAVANJE TIMERA RASVJETE
+---------------------------------------------------------------------
+uključi u 20:00  
+isključi u 5:30
+
+http://toplik.ddns.net:8020/sysctrl.cgi?TIMERON=2000&TIMEROFF=0530
+http://toplik.ddns.net:8021/sysctrl.cgi?TIMERON=2000&TIMEROFF=0530
+
+
+
+PODEŠAVANJE DATUMA I VREMENA
+---------------------------------------------------------------------
+DATE=x.....  prvi broj je dan u sedmici 1=PON .... 7=NED
+DATE=.xxxxxx ostalih šest po dvije cifre DAN MJESEC I GODINA SKRACENO
+TIME= po dvije cifre SAT,MINUTA,SEKUNDA u 24h formatu
+
+http://toplik.ddns.net:8020/sysctrl.cgi?DATE=4010825&TIME=094100
+http://toplik.ddns.net:8021/sysctrl.cgi?DATE=4010825&TIME=094100
+
+
+
+PROVJERA DATUMA, VREMENA I TIMERA
+---------------------------------------------------------------------
+
+http://toplik.ddns.net:8020/sysctrl.cgi?GETTIME
+http://toplik.ddns.net:8021/sysctrl.cgi?GETTIME
+
+
+
+VANJSKA RASVJETA
+---------------------------------------------------------------------
+CMD=DOUTSET&ADDRESS=1	- upali vanjska svjetla kućice 1
+CMD=DOUTSET&ADDRESS=4  	- upali vanjska svjetla kućice 2
+CMD=DOUTSET&ADDRESS=7  	- upali vanjska svjetla kućice 3
+CMD=DOUTSET&ADDRESS=10  - upali vanjska svjetla kućice 4
+CMD=DOUTSET&ADDRESS=13  - upali vanjska svjetla kućice 5
+CMD=DOUTSET&ADDRESS=14  - upali vanjska svjetla dvorišta
+
+CMD=DOUTRESET&ADDRESS=x  ugasi
+
+
+CMD=DOUTSET&ADDRESS=2  	kućica 1 - rezerva
+CMD=DOUTSET&ADDRESS=3  	kućica 1 - rezerva
+CMD=DOUTSET&ADDRESS=5  	kućica 2 - rezerva
+CMD=DOUTSET&ADDRESS=6  	kućica 2 - rezerva
+CMD=DOUTSET&ADDRESS=8  	kućica 3 - rezerva
+CMD=DOUTSET&ADDRESS=9  	kućica 3 - rezerva
+CMD=DOUTSET&ADDRESS=11  interni - samo stanje bez podešavanja
+CMD=DOUTSET&ADDRESS=12  kućica 4 - rezerva
+CMD=DOUTSET&ADDRESS=15  kućica 5 - rezerva

@@ -1303,7 +1303,7 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
   {
     pingWatchdogEnabled = false;
     preferences.begin("_pingwdg", false); // false = read/write
-    preferences.putBool("pingwdg", true);
+    preferences.putBool("pingwdg", false);
     preferences.end();
     request->send(200, "text/plain", String("Ping Watchdog State : ") + (pingWatchdogEnabled ? "ON" : "OFF"));
     break;
@@ -1767,7 +1767,7 @@ uint8_t toBCD(uint8_t val)
  */
 void sendRtcToBus()
 {
-  if (timeValid = false)
+  if (timeValid == false)
     return;
 
   time_t rawTime = time(nullptr);

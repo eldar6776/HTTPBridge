@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="hr" data-theme="dark">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <title>Manager Prijava</title>
+    <style>
+      main {
+        display: grid;
+        place-items: center;
+        min-height: 80vh;
+      }
+      article {
+        width: 100%;
+        max-width: 420px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h2 style="text-align: center;">Manager Prijava</h2>
+        <form id="loginForma">
+          <label for="pin">PIN</label>
+          <input 
+            type="password" 
+            id="pin" 
+            name="pin" 
+            placeholder="Vaš manager PIN" 
+            required
+            pattern="\d*"      
+            inputmode="numeric"
+            autocomplete="new-password" 
+          >
+          <button type="submit">Pristupi</button>
+        </form>
+        <div id="poruka" style="color: var(--pico-del-color); margin-top: 1rem;"></div>
+      </article>
+    </main>
+
+    <script>
+      document.getElementById('loginForma').addEventListener('submit', function(event) {
+        event.preventDefault();
+        const pin = document.getElementById('pin').value;
+        const porukaElement = document.getElementById('poruka');
+        const button = event.target.querySelector('button');
+
+        button.disabled = true;
+        porukaElement.textContent = '';
+
+        fetch('/api/manager/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin: pin }),
+        })
+        .then(response => response.json())
+        .then(data => {
+          if (data.success) {
+            // Uspjeh! Preusmjeri na admin dashboard
+            window.location.href = '/manager/dashboard';
+          } else {
+            porukaElement.textContent = data.message || 'Pogrešan PIN.';
+            button.disabled = false;
+          }
+        })
+        .catch(error => {
+          console.error('Greška:', error);
+          porukaElement.textContent = 'Greška pri komunikaciji sa serverom.';
+          button.disabled = false;
+        });
+      });
+    </script>
+  </body>
+</html>

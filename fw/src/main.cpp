@@ -169,6 +169,7 @@ enum CommandType
   CMD_SET_ROOM_TEMP = 0xD6,
   CMD_GET_GUEST_IN_TEMP = 0xD7,
   CMD_GET_GUEST_OUT_TEMP = 0xD8,
+  CMD_OPEN_DOOR = 0xDB,
   CMD_SET_THST_HEATING = 0xDC,
   CMD_SET_THST_COOLING = 0xDD,
   CMD_SET_THST_OFF = 0xDE,
@@ -237,6 +238,8 @@ CommandType stringToCommand(const String &cmd)
     return CMD_GET_PINS;
   if (cmd == "SET_PIN")
     return CMD_SET_PIN;
+  if (cmd == "OPEN_DOOR")
+    return CMD_OPEN_DOOR;
   if (cmd == "SET_THST_ON")
     return CMD_SET_THST_ON;
   if (cmd == "GET_FAN_DIFFERENCE")
@@ -1079,6 +1082,35 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
     length = 5;
     break;
   }
+  case CMD_OPEN_DOOR:
+  {
+    // Jednostavna "one-shot" komanda za otvaranje vrata
+    // Prima samo ID (broj sobe), automatski šalje PORT=C, PIN=8, VALUE=1
+    if (!request->hasParam("ID"))
+    {
+      request->send(400, "text/plain", "Missing ID");
+      return;
+    }
+
+    int id = request->getParam("ID")->value().toInt();
+
+    // ✅ Validacija ID-a (2-bajtna adresa podržava 1-65535)
+    if (id < 1 || id > 65535)
+    {
+      request->send(400, "text/plain", "Invalid ID (must be 1-65535)");
+      return;
+    }
+
+    // Automatski postavi parametre za otvaranje vrata: PORT=C, PIN=8, VALUE=1
+    buf[0] = cmd;          // 0xDB (OPEN_DOOR)
+    buf[1] = id >> 8;      // MSB adrese (visoki bajt)
+    buf[2] = id & 0xFF;    // LSB adrese (niski bajt)
+    buf[3] = 'C';          // PORT C (fiksno - vrata su na PC8)
+    buf[4] = 8;            // PIN 8 (fiksno - PC8)
+    buf[5] = 1;            // VALUE HIGH (fiksno - otključaj)
+    length = 6;
+    break;
+  }
   case CMD_GET_PINS:
   {
     if (!request->hasParam("ID"))
@@ -1696,6 +1728,10 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
 
       case CMD_SET_PASSWORD:
         body += "Password set OK";
+        break;
+
+      case CMD_OPEN_DOOR:
+        body += "Door Opened";
         break;
 
       case CMD_SET_ROOM_TEMP:

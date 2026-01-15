@@ -772,14 +772,14 @@ void updateLightState()
     onMin = sunriseMin;
   else if (timerOnType == "SUNSET")
     onMin = sunsetMin;
-  else if (timerOnTime.length() == 4)
+  else if (timerOnType != "OFF" && timerOnTime.length() == 4)
     onMin = timerOnTime.substring(0, 2).toInt() * 60 + timerOnTime.substring(2, 4).toInt();
 
   if (timerOffType == "SUNRISE")
     offMin = sunriseMin;
   else if (timerOffType == "SUNSET")
     offMin = sunsetMin;
-  else if (timerOffTime.length() == 4)
+  else if (timerOffType != "OFF" && timerOffTime.length() == 4)
     offMin = timerOffTime.substring(0, 2).toInt() * 60 + timerOffTime.substring(2, 4).toInt();
 
   int localMinutes = (utc_tm.tm_hour * 60 + utc_tm.tm_min + tzOffsetMinutes) % 1440;
@@ -1401,6 +1401,7 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
     result += "Timezone Offset=" + String(tzOffsetMinutes) + " min\n";
     result += "Daylight Saving Time=" + String(dstActive ? "YES" : "NO") + "\n";
     result += "Light Relay State=" + String(relayState ? "ON" : "OFF") + "\n";
+    result += "Light Control Mode=" + String(overrideActive ? "MANUAL" : "AUTO") + "\n";
     result += "TIMERON=" + timerOnType + "\n";
     result += "TIMEROFF=" + timerOffType + "\n";
     result += "ONTIME=" + String(onStr) + "\n";

@@ -17,17 +17,27 @@ extern "C"
 #include "TinyFrame.h"
 }
 
-// PIN definicije
-#define BOOT_PIN 0
-#define LED_PIN 2
-#define RS485_DE_PIN 4
-#define ONE_WIRE_PIN 5
-#define ONE_WIRE2_PIN 18
-#define FAN_L 25
-#define FAN_M 26
-#define FAN_H 27
-#define LIGHT_PIN 32 
-#define VALVE 33
+// PIN definicije - AŽURIRANO ZA SPI FLASH
+#define BOOT_PIN      0   // Boot dugme / WiFi Reset (ulaz)
+#define LED_PIN       2   // Onboard LED (Status)
+#define RS485_DE_PIN  4   // RS485 Transmit Enable
+
+// SPI Flash pinovi (rezervisano za budući razvoj)
+#define FLASH_CS      5   // SPI Flash Chip Select
+#define FLASH_SCK     18  // SPI Flash Serial Clock
+#define FLASH_MISO    19  // SPI Flash Data Out (fleš->ESP)
+#define FLASH_MOSI    23  // SPI Flash Data In (ESP->fleš)
+
+// OneWire senzori - PREMJEŠTENI sa GPIO 5 i 18 radi SPI Flash
+#define ONE_WIRE_PIN  13  // OneWire senzor 1 (bio na GPIO 5)
+#define ONE_WIRE2_PIN 14  // OneWire senzor 2 (bio na GPIO 18)
+
+// Termostat i Ventilator (ostaje nepromijenjeno)
+#define FAN_L         25  // Ventilator brzina 1 (Low)
+#define FAN_M         26  // Ventilator brzina 2 (Medium)
+#define FAN_H         27  // Ventilator brzina 3 (High)
+#define LIGHT_PIN     32  // Vanjska rasvjeta
+#define VALVE         33  // Termo ventil (Pumpa)
 #define SET_RTC_DATE_TIME 213
 #define DEF_TFBRA 255 // default broadcast address
 #define S_CUSTOM 23
@@ -56,6 +66,7 @@ bool timeValid = false;
 bool overrideActive = false;
 bool overrideState = false;
 int rdy, replyDataLength;
+volatile bool httpHandlerWaiting = false;  // Flag za blokiranje loop() čitanja
 bool pingWatchdogEnabled = false;
 unsigned long lastPingTime = 0;
 int pingFailures = 0;
@@ -70,26 +81,27 @@ uint8_t replyData[64] = {0};
 std::unique_ptr<AsyncWebServer> server;
 // Lista pinova koje već koristiš ili koji su hardverski rizični
 const int usedPins[] = { // NOLINT(cert-err58-cpp)
-    BOOT_PIN,     // npr. GPIO0
-    1,            // UART0 TX (Serial)
-    LED_PIN,      // npr. GPIO2
-    3,            // UART0 RX (Serial)
-    RS485_DE_PIN, // npr. GPIO4
-    ONE_WIRE_PIN,
-    6, 7, 8, 9, 10, 11, // povezani sa SPI flash – ne koristiti
-    16,                 // Serial2 RX2
-    17,                 // Serial2 TX2
-    ONE_WIRE2_PIN,
-    20, // ne postoji na većini ESP32 modula
-    LIGHT_PIN,
-    24, // ne postoji
-    FAN_L, FAN_M, FAN_H,
-    28, // ne postoji
-    29, // ne postoji
-    30, // ne postoji
-    31, // ne postoji
-    VALVE,
-    37, 38, 39 // samo za ulaz, nema izlaznu funkciju
+    BOOT_PIN,           // GPIO 0 - Boot dugme
+    1,                  // UART0 TX (Serial Monitor)
+    LED_PIN,            // GPIO 2 - Onboard LED
+    3,                  // UART0 RX (Serial Monitor)
+    RS485_DE_PIN,       // GPIO 4 - RS485 Direction Enable
+    FLASH_CS,           // GPIO 5 - SPI Flash CS
+    6, 7, 8, 9, 10, 11, // Povezani sa internim SPI flash – NE KORISTITI!
+    ONE_WIRE_PIN,       // GPIO 13 - OneWire senzor 1
+    ONE_WIRE2_PIN,      // GPIO 14 - OneWire senzor 2
+    16,                 // Serial2 RX2 (RS485)
+    17,                 // Serial2 TX2 (RS485)
+    FLASH_SCK,          // GPIO 18 - SPI Flash SCK
+    FLASH_MISO,         // GPIO 19 - SPI Flash MISO
+    20,                 // Ne postoji na većini ESP32 modula
+    FLASH_MOSI,         // GPIO 23 - SPI Flash MOSI
+    24,                 // Ne postoji
+    FAN_L, FAN_M, FAN_H, // GPIO 25, 26, 27 - Ventilator
+    28, 29, 30, 31,     // Ne postoje
+    LIGHT_PIN,          // GPIO 32 - Vanjska rasvjeta
+    VALVE,              // GPIO 33 - Termo ventil
+    37, 38, 39          // Samo ulaz (ADC), nema OUTPUT funkciju
 };
 
 const int numUsedPins = sizeof(usedPins) / sizeof(usedPins[0]);
@@ -148,15 +160,22 @@ const char *update_form_html = R"rawliteral(
 )rawliteral";
 /**
  * ENUMERATOR PODRZANIH KOMANDI
+ * 
+ * IC KONTROLER KOMANDE (0xAC-0xE1) - NE MIJENJATI! Definisano u common.h
+ * ESP32 LOKALNE KOMANDE (0x50-0x68) - Interni, korisnik ih ne vidi
  */
 enum CommandType
 {
   CMD_UNKNOWN,
+  CMD_GET_ROOM_STATUS = 0x94,      // IC kontroler - Get Room Status (Card Stacker)
+  // ESP32 lokalne komande - Interni pinovi i senzori
   CMD_ESP_GET_PINS = 0xA0,
   CMD_ESP_SET_PIN = 0xA1,
   CMD_ESP_RESET_PIN = 0xA2,
   CMD_ESP_PULSE_PIN = 0xA3,
   CMD_GET_STATUS = 0xAA,
+  
+  // IC Kontroler komande - RS485 (common.h) - NE MIJENJATI!
   CMD_GET_ROOM_TEMP = 0xAC,
   CMD_SET_PIN = 0xB1,
   CMD_GET_PINS = 0xB2,
@@ -164,41 +183,52 @@ enum CommandType
   CMD_GET_FAN_DIFFERENCE = 0xB5,
   CMD_GET_FAN_BAND = 0xB6,
   CMD_RESTART_CTRL = 0xC0,
+  CMD_READ_LOG = 0xCE,             // IC kontroler - Read last log
+  CMD_DELETE_LOG = 0xCF,           // IC kontroler - Delete last log
   CMD_SET_GUEST_IN_TEMP = 0xD0,
   CMD_SET_GUEST_OUT_TEMP = 0xD1,
   CMD_SET_ROOM_TEMP = 0xD6,
   CMD_GET_GUEST_IN_TEMP = 0xD7,
   CMD_GET_GUEST_OUT_TEMP = 0xD8,
-  CMD_OPEN_DOOR = 0xDB,
+  CMD_OPEN_DOOR = 0xDB,            // HOTEL_SET_PIN_V2
   CMD_SET_THST_HEATING = 0xDC,
   CMD_SET_THST_COOLING = 0xDD,
   CMD_SET_THST_OFF = 0xDE,
-  CMD_SET_PASSWORD = 0xDF,
-  CMD_GET_SSID_PSWRD = 0xE0,
-  CMD_SET_SSID_PSWRD = 0xE1,
-  CMD_GET_MDNS_NAME = 0xE2,
-  CMD_SET_MDNS_NAME = 0xE3,
-  CMD_GET_TCPIP_PORT = 0xE4,
-  CMD_SET_TCPIP_PORT = 0xE5,
-  CMD_GET_IP_ADDRESS = 0xE6,
-  CMD_RESTART = 0xE7,
-  CMD_GET_TIMER = 0xE8,
-  CMD_SET_TIMER = 0xE9,
-  CMD_GET_TIME = 0xEA,
-  CMD_SET_TIME = 0xEB,
-  CMD_OUTDOOR_LIGHT_ON = 0xEC,
-  CMD_OUTDOOR_LIGHT_OFF = 0xED,
-  CMD_GET_PINGWDG = 0xEE,
-  CMD_PINGWDG_ON = 0xEF,
-  CMD_PINGWDG_OFF = 0xF0,
-  CMD_TH_SETPOINT = 0xF1,
-  CMD_TH_DIFF = 0xF2,
-  CMD_TH_STATUS = 0xF3,
-  CMD_TH_HEATING = 0xF4,
-  CMD_TH_COOLING = 0xF5,
-  CMD_TH_OFF = 0xF6,
-  CMD_TH_ON = 0xF7,
-  CMD_TH_EMA = 0xF8
+  CMD_SET_PASSWORD = 0x96,
+
+  CMD_QR_CODE_GET = 0xE5,          // IC kontroler - Get QR Code
+  CMD_QR_CODE_SET = 0xE6,          // IC kontroler - Set QR Code
+  CMD_SET_LANG = 0xE9,             // IC kontroler - Set Language
+  CMD_GET_SYSID = 0xEA,            // IC kontroler - Get System ID
+  CMD_SET_SYSID = 0xEB,            // IC kontroler - Set System ID
+  CMD_GET_PASSWORD = 0xEC,         // IC kontroler
+  // ESP32 lokalne komande - Premješteno na siguran opseg (0x50-0x68)
+  
+  CMD_GET_SSID_PSWRD = 0x50,
+  CMD_SET_SSID_PSWRD = 0x51,
+  CMD_GET_MDNS_NAME = 0x52,
+  CMD_SET_MDNS_NAME = 0x53,
+  CMD_GET_TCPIP_PORT = 0x54,
+  CMD_SET_TCPIP_PORT = 0x55,
+  CMD_GET_IP_ADDRESS = 0x56,
+  CMD_RESTART = 0x57,
+  CMD_GET_TIMER = 0x58,
+  CMD_SET_TIMER = 0x59,
+  CMD_GET_TIME = 0x5A,
+  CMD_SET_TIME = 0x5B,
+  CMD_OUTDOOR_LIGHT_ON = 0x5C,
+  CMD_OUTDOOR_LIGHT_OFF = 0x5D,
+  CMD_GET_PINGWDG = 0x5E,
+  CMD_PINGWDG_ON = 0x5F,
+  CMD_PINGWDG_OFF = 0x60,
+  CMD_TH_SETPOINT = 0x61,
+  CMD_TH_DIFF = 0x62,
+  CMD_TH_STATUS = 0x63,
+  CMD_TH_HEATING = 0x64,
+  CMD_TH_COOLING = 0x65,
+  CMD_TH_OFF = 0x66,
+  CMD_TH_ON = 0x67,
+  CMD_TH_EMA = 0x68
 
 };
 /**
@@ -264,6 +294,12 @@ CommandType stringToCommand(const String &cmd)
     return CMD_SET_THST_OFF;
   if (cmd == "SET_PASSWORD")
     return CMD_SET_PASSWORD;
+  if (cmd == "GET_PASSWORD")
+    return CMD_GET_PASSWORD;
+  if (cmd == "READ_LOG")
+    return CMD_READ_LOG;
+  if (cmd == "DELETE_LOG")
+    return CMD_DELETE_LOG;
   if (cmd == "GET_IP_ADDRESS")
     return CMD_GET_IP_ADDRESS;
   if (cmd == "GET_TIMER")
@@ -300,7 +336,149 @@ CommandType stringToCommand(const String &cmd)
     return CMD_TH_ON;
   if (cmd == "TH_EMA")
     return CMD_TH_EMA;
+  if (cmd == "SET_LANG")
+    return CMD_SET_LANG;
+  if (cmd == "GET_SYSID")
+    return CMD_GET_SYSID;
+  if (cmd == "SET_SYSID")
+    return CMD_SET_SYSID;
+  if (cmd == "QR_CODE_SET")
+    return CMD_QR_CODE_SET;
+  if (cmd == "QR_CODE_GET")
+    return CMD_QR_CODE_GET;
+  if (cmd == "GET_ROOM_STATUS")
+    return CMD_GET_ROOM_STATUS;
   return CMD_UNKNOWN;
+}
+/**
+ * HELPER FUNKCIJA - BCD to Decimal konverzija
+ */
+uint8_t bcdToDec(uint8_t bcd)
+{
+  return ((bcd >> 4) * 10) + (bcd & 0x0F);
+}
+/**
+ * HELPER FUNKCIJA - Event code to event name
+ */
+String getEventName(uint8_t eventCode)
+{
+  if (eventCode == 0x90) return "SPI_DRIVER_ERROR";
+  if (eventCode == 0x91) return "I2C_DRIVER_ERROR";
+  if (eventCode == 0x92) return "USART_DRIVER_ERROR";
+  if (eventCode == 0x93) return "RTC_DRIVER_ERROR";
+  if (eventCode == 0x94) return "TIMER_DRIVER_ERROR";
+  if (eventCode == 0x95) return "ETHERNET_DRIVER_ERROR";
+  if (eventCode == 0x96) return "CRC_DRIVER_ERROR";
+  if (eventCode == 0x97) return "ADC_DRIVER_ERROR";
+  if (eventCode == 0x98) return "SYSTEM_CLOCK_ERROR";
+  if (eventCode == 0x99) return "SYSTEM_EXCEPTION";
+  if (eventCode == 0x9A) return "QSPI_DRIVER_ERROR";
+  if (eventCode == 0x9B) return "FLASH_DRIVER_ERROR";
+  if (eventCode == 0x9C) return "SOFTWARE_RESET";
+  if (eventCode == 0xA0) return "CAPACITIVE_SENSOR_ERROR";
+  if (eventCode == 0xA1) return "RC522_MIFARE_ERROR";
+  if (eventCode == 0xA2) return "ONEWIRE_ERROR";
+  if (eventCode == 0xA3) return "RS485_ERROR";
+  if (eventCode == 0xA4) return "MAIN_FUNCTION_ERROR";
+  if (eventCode == 0xA5) return "DISPLAY_ERROR";
+  if (eventCode == 0xA6) return "LOGGER_ERROR";
+  if (eventCode == 0xA7) return "DIO_ERROR";
+  if (eventCode == 0xA8) return "EEPROM_ERROR";
+  if (eventCode == 0xA9) return "ROOM_FUNCTION_ERROR";
+  if (eventCode == 0xAA) return "TCPIP_STACK_FAILURE";
+  if (eventCode == 0xAB) return "HOTEL_CTRL_FAILURE";
+  if (eventCode == 0xAC) return "HTTPD_SERVER_FAILURE";
+  if (eventCode == 0xAD) return "THERMOSTAT_FAILURE";
+  if (eventCode == 0xAE) return "GENERAL_FAILURE";
+  if (eventCode == 0xB0) return "FILE_SYSTEM_OK";
+  if (eventCode == 0xB1) return "FILE_SYSTEM_DRIVE_ERROR";
+  if (eventCode == 0xB2) return "FILE_SYSTEM_DIR_ERROR";
+  if (eventCode == 0xB3) return "FILE_SYSTEM_FILE_ERROR";
+  if (eventCode == 0xB4) return "OUT_OF_MEMORY";
+  if (eventCode == 0xB5) return "ADDRESS_LIST_ERROR";
+  if (eventCode == 0xB6) return "ADDRESS_LIST_SD_ERROR";
+  if (eventCode == 0xB7) return "DEVICE_NOT_RESPONDING";
+  if (eventCode == 0xB8) return "PIN_RESET";
+  if (eventCode == 0xB9) return "POWER_ON_RESET";
+  if (eventCode == 0xBA) return "SOFTWARE_RESET";
+  if (eventCode == 0xBB) return "IWDG_RESET";
+  if (eventCode == 0xBC) return "WWDG_RESET";
+  if (eventCode == 0xBE) return "LOW_POWER_RESET";
+  if (eventCode == 0xC8) return "RS485_BUS_ERROR";
+  if (eventCode == 0xC9) return "RT_RPM_SENSOR_ERROR";
+  if (eventCode == 0xCA) return "RT_FANCOIL_NTC_ERROR";
+  if (eventCode == 0xCB) return "RT_LOW_TEMP_ERROR";
+  if (eventCode == 0xCC) return "RT_HIGH_TEMP_ERROR";
+  if (eventCode == 0xCD) return "RT_FREEZE_PROTECTION";
+  if (eventCode == 0xCE) return "RT_DISPLAY_NTC_ERROR";
+  if (eventCode == 0xCF) return "FIRMWARE_UPDATED";
+  if (eventCode == 0xD0) return "FIRMWARE_UPDATE_FAILED";
+  if (eventCode == 0xD1) return "BOOTLOADER_UPDATED";
+  if (eventCode == 0xD2) return "BOOTLOADER_UPDATE_FAILED";
+  if (eventCode == 0xD3) return "IMAGE_UPDATED";
+  if (eventCode == 0xD4) return "IMAGE_UPDATE_FAILED";
+  if (eventCode == 0xD5) return "FILE_COPY_FAILED";
+  if (eventCode == 0xD6) return "FILE_BACKUP_FAILED";
+  if (eventCode == 0xD7) return "UNKNOWN_CARD";
+  if (eventCode == 0xD8) return "CARD_EXPIRED";
+  if (eventCode == 0xD9) return "CARD_INVALID";
+  if (eventCode == 0xDA) return "WRONG_ROOM";
+  if (eventCode == 0xDB) return "WRONG_SYSTEM_ID";
+  if (eventCode == 0xDC) return "GUEST_CARD";
+  if (eventCode == 0xDD) return "HANDMAID_CARD";
+  if (eventCode == 0xDE) return "MANAGER_CARD";
+  if (eventCode == 0xDF) return "SERVICE_CARD";
+  if (eventCode == 0xE0) return "ENTRY_DOOR_OPENED";
+  if (eventCode == 0xE1) return "ENTRY_DOOR_CLOSED";
+  if (eventCode == 0xE2) return "ENTRY_DOOR_NOT_CLOSED";
+  if (eventCode == 0xE3) return "MINIBAR_USED";
+  if (eventCode == 0xE4) return "BALCONY_DOOR_OPENED";
+  if (eventCode == 0xE5) return "BALCONY_DOOR_CLOSED";
+  if (eventCode == 0xE6) return "CARD_STACKER_ON";
+  if (eventCode == 0xE7) return "CARD_STACKER_OFF";
+  if (eventCode == 0xE8) return "DO_NOT_DISTURB_ON";
+  if (eventCode == 0xE9) return "DO_NOT_DISTURB_OFF";
+  if (eventCode == 0xEA) return "HANDMAID_SWITCH_ON";
+  if (eventCode == 0xEB) return "HANDMAID_SWITCH_OFF";
+  if (eventCode == 0xEC) return "HANDMAID_SERVICE_END";
+  if (eventCode == 0xED) return "SOS_ALARM_TRIGGERED";
+  if (eventCode == 0xEE) return "SOS_ALARM_RESET";
+  if (eventCode == 0xEF) return "FIRE_ALARM_TRIGGERED";
+  if (eventCode == 0xF0) return "FIRE_ALARM_RESET";
+  if (eventCode == 0xF1) return "FLOOD_SENSOR_ACTIVE";
+  if (eventCode == 0xF2) return "FLOOD_SENSOR_INACTIVE";
+  if (eventCode == 0xF3) return "DOOR_BELL_ACTIVE";
+  if (eventCode == 0xF4) return "DOOR_LOCK_USER_OPEN";
+  if (eventCode == 0xF5) return "FIRE_EXIT_TRIGGERED";
+  if (eventCode == 0xF6) return "FIRE_EXIT_RESET";
+  if (eventCode == 0xF7) return "PASSWORD_VALID";
+  if (eventCode == 0xF8) return "PASSWORD_INVALID";
+  if (eventCode == 0xF9) return "ROOM_TIME_POWER_OFF";
+  return "UNKNOWN_EVENT";
+}
+/**
+ * HELPER FUNKCIJA - User-friendly access description
+ */
+String getAccessDescription(uint8_t eventCode, uint8_t userGroup)
+{
+  if (eventCode == 0xDC) return "Gost usao karticom";
+  if (eventCode == 0xDD) return "Sobarica usla karticom";
+  if (eventCode == 0xDE) return "Manager usao karticom";
+  if (eventCode == 0xDF) return "Service usao karticom";
+  if (eventCode == 0xF7) {
+    if (userGroup == 1) return "Gost usao PIN-om";
+    if (userGroup == 2) return "Sobarica usla PIN-om";
+    if (userGroup == 3) return "Manager usao PIN-om";
+    if (userGroup == 4) return "Service usao PIN-om";
+    return "Korisnik usao PIN-om";
+  }
+  if (eventCode == 0xF8) return "Pogresan PIN";
+  if (eventCode == 0xD7) return "Nepoznata kartica";
+  if (eventCode == 0xD8) return "Kartica istekla";
+  if (eventCode == 0xD9) return "Nevazeca kartica";
+  if (eventCode == 0xDA) return "Pogresna soba";
+  if (eventCode == 0xDB) return "Pogresan sistem ID";
+  return getEventName(eventCode);
 }
 /**
  * HELPER FUNKCIJA ZA BLOKADU SETOVANJA INPUT ONLY PINOVA
@@ -598,6 +776,16 @@ String getAvailablePinsStatus()
  */
 TF_Result ID_Listener(TinyFrame *tf, TF_Msg *msg)
 {
+  Serial.printf("=== ID_Listener: received %d bytes, frame_id=0x%02X, type=0x%02X ===\n", 
+                msg->len, msg->frame_id, msg->type);
+  Serial.print("Data: ");
+  for (int i = 0; i < msg->len && i < 50; i++) {
+    if (msg->data[i] < 0x10) Serial.print('0');
+    Serial.print(msg->data[i], HEX);
+    Serial.print(' ');
+  }
+  Serial.println();
+  
   replyDataLength = msg->len;
   memcpy(replyData, msg->data, msg->len);
   rdy = -1;
@@ -971,21 +1159,107 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
   }
   case CMD_SET_PASSWORD:
   {
-    if (!request->hasParam("ID") || !request->hasParam("PASSWORD"))
+    if (!request->hasParam("ID") || !request->hasParam("TYPE") || !request->hasParam("PASSWORD"))
     {
-      request->send(400, "text/plain", "Missing ID or PASSWORD");
+      request->send(400, "text/plain", "Missing ID, TYPE or PASSWORD");
       return;
     }
-    buf[0] = CMD_SET_PASSWORD;
+    
+    int id = request->getParam("ID")->value().toInt();
+    String type = request->getParam("TYPE")->value();
+    String password = request->getParam("PASSWORD")->value();
+    
+    // Validacija ID-a
+    if (id < 1 || id > 254)
     {
-      int id = request->getParam("ID")->value().toInt();
-      buf[1] = id >> 8;
-      buf[2] = id & 0xFF;
-
-      const char *pw = request->getParam("PASSWORD")->value().c_str();
-      strlcpy((char *)buf + 3, pw, sizeof(buf) - 3);
-      length = 3 + strlen(pw) + 1;
+      request->send(400, "text/plain", "Invalid ID (must be 1-254)");
+      return;
     }
+    
+    // Validacija lozinke (samo numerički karakteri)
+    for (size_t i = 0; i < password.length(); i++)
+    {
+      if (!isdigit(password[i]))
+      {
+        request->send(400, "text/plain", "Password must contain only digits");
+        return;
+      }
+    }
+    
+    String dataString = "";
+    
+    if (type == "GUEST")
+    {
+      // Guest lozinka zahtijeva GUEST_ID i EXPIRY
+      if (!request->hasParam("GUEST_ID") || !request->hasParam("EXPIRY"))
+      {
+        request->send(400, "text/plain", "Missing GUEST_ID or EXPIRY for GUEST type");
+        return;
+      }
+      
+      int guestId = request->getParam("GUEST_ID")->value().toInt();
+      String expiry = request->getParam("EXPIRY")->value();
+      
+      // Validacija GUEST_ID
+      if (guestId < 1 || guestId > 8)
+      {
+        request->send(400, "text/plain", "Invalid GUEST_ID (must be 1-8)");
+        return;
+      }
+      
+      // Validacija EXPIRY formata (mora biti 10 karaktera: HHMMDDMMYY)
+      if (expiry.length() != 10)
+      {
+        request->send(400, "text/plain", "Invalid EXPIRY format (must be HHMMDDMMYY)");
+        return;
+      }
+      
+      // Kreiraj string: G{ID},{PASSWORD},{EXPIRY}
+      dataString = "G" + String(guestId) + "," + password + "," + expiry;
+    }
+    else if (type == "MAID")
+    {
+      dataString = "H" + password;
+    }
+    else if (type == "MANAGER")
+    {
+      dataString = "M" + password;
+    }
+    else if (type == "SERVICE")
+    {
+      dataString = "S" + password;
+    }
+    else if (type == "DELETE_GUEST")
+    {
+      // Brisanje Guest lozinke: G{ID}X
+      if (!request->hasParam("GUEST_ID"))
+      {
+        request->send(400, "text/plain", "Missing GUEST_ID for DELETE_GUEST");
+        return;
+      }
+      
+      int guestId = request->getParam("GUEST_ID")->value().toInt();
+      
+      if (guestId < 1 || guestId > 8)
+      {
+        request->send(400, "text/plain", "Invalid GUEST_ID (must be 1-8)");
+        return;
+      }
+      
+      dataString = "G" + String(guestId) + "X";
+    }
+    else
+    {
+      request->send(400, "text/plain", "Invalid TYPE (must be GUEST, MAID, MANAGER, SERVICE or DELETE_GUEST)");
+      return;
+    }
+    
+    // Kreiraj RS485 poruku
+    buf[0] = CMD_SET_PASSWORD;
+    buf[1] = id;
+    strlcpy((char *)buf + 2, dataString.c_str(), sizeof(buf) - 2);
+    length = 2 + dataString.length() + 1;  // +1 za null terminator
+    
     break;
   }
   case CMD_SET_ROOM_TEMP:
@@ -1021,6 +1295,105 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
     length = 3;
     break;
   }
+  case CMD_GET_PASSWORD:
+  {
+    if (!request->hasParam("ID") || !request->hasParam("TYPE"))
+    {
+      request->send(400, "text/plain", "Missing ID or TYPE");
+      return;
+    }
+    
+    int id = request->getParam("ID")->value().toInt();
+    String type = request->getParam("TYPE")->value();
+    
+    // Validacija ID-a
+    if (id < 1 || id > 254)
+    {
+      request->send(400, "text/plain", "Invalid ID (must be 1-254)");
+      return;
+    }
+    
+    char userGroup = 0;
+    uint8_t guestId = 0;
+    
+    if (type == "GUEST")
+    {
+      if (!request->hasParam("GUEST_ID"))
+      {
+        request->send(400, "text/plain", "Missing GUEST_ID for GUEST type");
+        return;
+      }
+      
+      guestId = request->getParam("GUEST_ID")->value().toInt();
+      
+      // Validacija GUEST_ID
+      if (guestId < 1 || guestId > 8)
+      {
+        request->send(400, "text/plain", "Invalid GUEST_ID (must be 1-8)");
+        return;
+      }
+      
+      userGroup = 'G';
+      buf[0] = CMD_GET_PASSWORD;
+      buf[1] = id;
+      buf[2] = userGroup;
+      buf[3] = guestId;
+      length = 4;
+    }
+    else if (type == "MAID")
+    {
+      userGroup = 'H';
+      buf[0] = CMD_GET_PASSWORD;
+      buf[1] = id;
+      buf[2] = userGroup;
+      length = 3;
+    }
+    else if (type == "MANAGER")
+    {
+      userGroup = 'M';
+      buf[0] = CMD_GET_PASSWORD;
+      buf[1] = id;
+      buf[2] = userGroup;
+      length = 3;
+    }
+    else if (type == "SERVICE")
+    {
+      userGroup = 'S';
+      buf[0] = CMD_GET_PASSWORD;
+      buf[1] = id;
+      buf[2] = userGroup;
+      length = 3;
+    }
+    else
+    {
+      request->send(400, "text/plain", "Invalid TYPE (must be GUEST, MAID, MANAGER or SERVICE)");
+      return;
+    }
+    
+    break;
+  }
+  case CMD_READ_LOG:
+  case CMD_DELETE_LOG:
+  {
+    if (!request->hasParam("ID"))
+    {
+      request->send(400, "text/plain", "Missing ID parameter");
+      return;
+    }
+    
+    int id = request->getParam("ID")->value().toInt();
+    
+    if (id < 1 || id > 254)
+    {
+      request->send(400, "text/plain", "Invalid ID (must be 1-254)");
+      return;
+    }
+    
+    buf[0] = cmd;
+    buf[1] = id;
+    length = 2;
+    break;
+  }
   case CMD_GET_ROOM_TEMP:
   case CMD_GET_GUEST_IN_TEMP:
   case CMD_GET_GUEST_OUT_TEMP:
@@ -1036,8 +1409,18 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
       request->send(400, "text/plain", "Missing ID");
       return;
     }
+    
+    int id = request->getParam("ID")->value().toInt();
+    
+    // ✅ Validacija 1-bajtne adrese
+    if (id < 1 || id > 254)
+    {
+      request->send(400, "text/plain", "Invalid ID (must be 1-254)");
+      return;
+    }
+    
     buf[0] = cmd;
-    buf[1] = request->getParam("ID")->value().toInt();
+    buf[1] = id;
     length = 2;
     break;
   }
@@ -1094,21 +1477,17 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
 
     int id = request->getParam("ID")->value().toInt();
 
-    // ✅ Validacija ID-a (2-bajtna adresa podržava 1-65535)
-    if (id < 1 || id > 65535)
+    // ✅ Validacija 1-bajtne adrese
+    if (id < 1 || id > 254)
     {
-      request->send(400, "text/plain", "Invalid ID (must be 1-65535)");
+      request->send(400, "text/plain", "Invalid ID (must be 1-254)");
       return;
     }
 
-    // Automatski postavi parametre za otvaranje vrata: PORT=C, PIN=8, VALUE=1
-    buf[0] = cmd;          // 0xDB (OPEN_DOOR)
-    buf[1] = id >> 8;      // MSB adrese (visoki bajt)
-    buf[2] = id & 0xFF;    // LSB adrese (niski bajt)
-    buf[3] = 'C';          // PORT C (fiksno - vrata su na PC8)
-    buf[4] = 8;            // PIN 8 (fiksno - PC8)
-    buf[5] = 1;            // VALUE HIGH (fiksno - otključaj)
-    length = 6;
+    // Komanda za otvaranje vrata (bez dodatnih parametara)
+    buf[0] = cmd;       // 0xDB (OPEN_DOOR)
+    buf[1] = id;        // 1-bajtna adresa (1-254)
+    length = 2;         // Samo CMD i ID
     break;
   }
   case CMD_GET_PINS:
@@ -1129,6 +1508,120 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
     buf[1] = id;
     buf[2] = 0xB2;
     length = 3;
+    break;
+  }
+  case CMD_SET_LANG:
+  {
+    if (!request->hasParam("ID") || !request->hasParam("VALUE"))
+    {
+      request->send(400, "text/plain", "Missing ID or VALUE");
+      return;
+    }
+    int id = request->getParam("ID")->value().toInt();
+    int lang = request->getParam("VALUE")->value().toInt();
+
+    if (id < 1 || id > 254) {
+      request->send(400, "text/plain", "Invalid ID");
+      return;
+    }
+
+    if (lang < 0 || lang > 2) {
+      request->send(400, "text/plain", "Invalid VALUE (0=SRB, 1=ENG, 2=GER)");
+      return;
+    }
+    
+    buf[0] = cmd;
+    buf[1] = id;
+    buf[2] = (uint8_t)lang;
+    length = 3;
+    break;
+  }
+  case CMD_QR_CODE_SET:
+  {
+    if (!request->hasParam("ID") || !request->hasParam("QR_CODE"))
+    {
+      request->send(400, "text/plain", "Missing ID or QR_CODE");
+      return;
+    }
+    int id = request->getParam("ID")->value().toInt();
+    String qr = request->getParam("QR_CODE")->value();
+
+    if (id < 1 || id > 254) {
+      request->send(400, "text/plain", "Invalid ID");
+      return;
+    }
+    if (qr.length() > 128) {
+      request->send(400, "text/plain", "QR Code too long (max 128)");
+      return;
+    }
+
+    buf[0] = cmd;
+    buf[1] = id;
+    memcpy(buf + 2, qr.c_str(), qr.length());
+    buf[2 + qr.length()] = 0; // Null terminate just in case, though length handles it
+    length = 2 + qr.length(); // CMD + ID + String
+    break;
+  }
+  case CMD_QR_CODE_GET:
+  case CMD_GET_ROOM_STATUS:
+  {
+    if (!request->hasParam("ID"))
+    {
+      request->send(400, "text/plain", "Missing ID");
+      return;
+    }
+    int id = request->getParam("ID")->value().toInt();
+    if (id < 1 || id > 254) {
+      request->send(400, "text/plain", "Invalid ID");
+      return;
+    }
+    buf[0] = cmd;
+    buf[1] = id;
+    length = 2;
+    break;
+  }
+  case CMD_GET_SYSID:
+  {
+    if (!request->hasParam("ID"))
+    {
+      request->send(400, "text/plain", "Missing ID");
+      return;
+    }
+    int id = request->getParam("ID")->value().toInt();
+    if (id < 1 || id > 254) {
+      request->send(400, "text/plain", "Invalid ID");
+      return;
+    }
+    buf[0] = cmd;
+    buf[1] = id;
+    length = 2;
+    break;
+  }
+  case CMD_SET_SYSID:
+  {
+    if (!request->hasParam("ID") || !request->hasParam("VALUE"))
+    {
+      request->send(400, "text/plain", "Missing ID or VALUE");
+      return;
+    }
+    int id = request->getParam("ID")->value().toInt();
+    int sysid_val = request->getParam("VALUE")->value().toInt(); // Očekujemo decimalnu vrijednost (npr. 43981 za 0xABCD)
+
+    if (id < 1 || id > 254) {
+      request->send(400, "text/plain", "Invalid ID");
+      return;
+    }
+    
+    // Rastavljanje 16-bitnog SYSID na 2 bajta
+    // Napomena: common.h koristi format [CMD][ADDR][VAL_MSB][VAL_LSB] za neke komande, 
+    // ali provjeri rs485_ulaz.c implementaciju:
+    // RS_SetSysID: sysid[0] = msg->data[2]; sysid[1] = msg->data[3];
+    
+    buf[0] = cmd;
+    buf[1] = id;
+    buf[2] = (uint8_t)((sysid_val >> 8) & 0xFF); // MSB
+    buf[3] = (uint8_t)(sysid_val & 0xFF);        // LSB
+    length = 4;
     break;
   }
   case CMD_GET_TIMER:
@@ -1672,23 +2165,72 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
       Serial.print(' ');
     }
     Serial.println();
+    
+    // Blokiraj loop() od čitanja Serial2 ŠTO PRIJE!
+    httpHandlerWaiting = true;
+    
+    // KLJUČNO: Očisti Serial2 buffer prije slanja komande!
+    int flushed = 0;
+    while (Serial2.available()) {
+      Serial2.read();
+      flushed++;
+    }
+    if (flushed > 0) {
+      Serial.printf(">>> Flushed %d old bytes from Serial2 buffer\n", flushed);
+    }
+    
+    Serial.printf(">>> Starting TF_QuerySimple, rdy=%d\n", TF_PARSER_TIMEOUT_TICKS * 10);
     // TF_SendSimple(&tfapp, S_CUSTOM, buf, length);
-    TF_QuerySimple(&tfapp, S_CUSTOM, buf, length, ID_Listener, TF_PARSER_TIMEOUT_TICKS * 4);
-    rdy = TF_PARSER_TIMEOUT_TICKS * 4;
+    TF_QuerySimple(&tfapp, S_CUSTOM, buf, length, ID_Listener, TF_PARSER_TIMEOUT_TICKS * 10);
+    rdy = TF_PARSER_TIMEOUT_TICKS * 10;
+    int bytesRead = 0;
     do
     {
+      // WHILE ne IF - mora čitati SVE dostupne bajtove odmah!
+      while (Serial2.available())
+      {
+        uint8_t b = Serial2.read();
+        bytesRead++;
+        Serial.printf("[0x%02X]", b);
+        TF_AcceptChar(&tfapp, b);
+        
+        // PREKINI ODMAH ako je ID_Listener postavio rdy = -1
+        if (rdy < 0) {
+          break;
+        }
+      }
+      
+      // Provjeri ponovo nakon while petlje
+      if (rdy < 0) {
+        break;
+      }
+      
       --rdy;
       delay(1);
     } while (rdy > 0);
+    
+    // Deblokiraj loop()
+    httpHandlerWaiting = false;
+    
+    Serial.printf("\n>>> Wait loop finished, rdy=%d, bytes read=%d\n", rdy, bytesRead);
 
     if (rdy == 0)
     {
+      Serial.println(">>> TIMEOUT detected!");
       request->send(200, "text/plain", "TIMEOUT");
     }
     else
     {
+      Serial.println(">>> Response received, processing...");
       String body = "";
 
+      // Special handling for QR_CODE_GET because response might not start with CMD byte
+      if (cmd == CMD_QR_CODE_GET) {
+         // Assuming the response is just the string data
+         char qrBuf[129] = {0};
+         memcpy(qrBuf, replyData, (replyDataLength < 128) ? replyDataLength : 128);
+         body += "QR_CODE=" + String(qrBuf);
+      } else
       switch (replyData[0])
       {
 
@@ -1731,6 +2273,53 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
         body += "Password set OK";
         break;
 
+      case CMD_GET_PASSWORD:
+      {
+        if (replyDataLength < 2)
+        {
+          body += "Invalid response length";
+          break;
+        }
+        
+        uint8_t ack = replyData[1];
+        
+        if (ack != 0x06)  // ACK = 0x06
+        {
+          body += "Password read FAILED (NAK)";
+          break;
+        }
+        
+        // Provjeri tip korisnika prema dužini odgovora
+        if (replyDataLength == 10)  // Guest: CMD + ACK + 8 bytes
+        {
+          uint8_t guestId = replyData[2];
+          uint32_t password = ((uint32_t)replyData[3] << 16) | ((uint32_t)replyData[4] << 8) | replyData[5];
+          uint32_t expiry = ((uint32_t)replyData[6] << 24) | ((uint32_t)replyData[7] << 16) | 
+                            ((uint32_t)replyData[8] << 8) | replyData[9];
+          
+          // Konvertuj expiry Unix timestamp u datum
+          time_t expiryTime = (time_t)expiry;
+          struct tm *timeInfo = gmtime(&expiryTime);  // Koristi gmtime jer IC kontroler vraća UTC timestamp
+          char expiryStr[20];
+          strftime(expiryStr, sizeof(expiryStr), "%Y-%m-%d %H:%M", timeInfo);
+          
+          body += "Guest ID: " + String(guestId) + "\n";
+          body += "Password: " + String(password) + "\n";
+          body += "Expiry: " + String(expiryStr);
+        }
+        else if (replyDataLength == 5)  // Maid/Manager/Service: CMD + ACK + 3 bytes
+        {
+          uint32_t password = ((uint32_t)replyData[2] << 16) | ((uint32_t)replyData[3] << 8) | replyData[4];
+          body += "Password: " + String(password);
+        }
+        else
+        {
+          body += "Unexpected response format (length=" + String(replyDataLength) + ")";
+        }
+        
+        break;
+      }
+
       case CMD_OPEN_DOOR:
         body += "Door Opened";
         break;
@@ -1748,8 +2337,159 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
         body += "Thermostat set OK";
         break;
 
+      case CMD_READ_LOG:
+      {
+        // Response format: [CMD][LOG_DSIZE][16-byte log data][device_addr_H][device_addr_L]
+        // Total: 20 bytes
+        if (replyDataLength < 20)
+        {
+          body += "Invalid response length (expected 20, got " + String(replyDataLength) + ")";
+          break;
+        }
+        
+        if (replyData[1] != 16)
+        {
+          body += "Invalid log data size (expected 16, got " + String(replyData[1]) + ")";
+          break;
+        }
+        
+        // Parse 16-byte log data (bytes 2-17)
+        uint16_t logId = (replyData[2] << 8) | replyData[3];
+        
+        // Check if log list is empty (log_id = 0x0000 indicates LOGGER_EMPTY)
+        if (logId == 0)
+        {
+          int deviceId = request->getParam("ID")->value().toInt();
+          body = "{";
+          body += "\"status\":\"EMPTY\",";
+          body += "\"device_id\":" + String(deviceId) + ",";
+          body += "\"message\":\"Log list is empty\"";
+          body += "}";
+          request->send(200, "application/json", body);
+          return;
+        }
+        
+        uint8_t logEvent = replyData[4];
+        uint8_t logType = replyData[5];
+        uint8_t logGroup = replyData[6];
+        
+        // Card ID (5 bytes) - from log bytes [5-9]
+        char cardIdHex[11];
+        sprintf(cardIdHex, "%02X%02X%02X%02X%02X", 
+                replyData[7], replyData[8], replyData[9], replyData[10], replyData[11]);
+        
+        // Debug: Print raw bytes to Serial
+        Serial.print("LOG RAW DATA: ");
+        for (int i = 2; i < 18; i++) {
+          if (replyData[i] < 0x10) Serial.print('0');
+          Serial.print(replyData[i], HEX);
+          Serial.print(' ');
+        }
+        Serial.println();
+        
+        // Date/Time (BCD format)
+        uint8_t day = bcdToDec(replyData[12]);
+        uint8_t month = bcdToDec(replyData[13]);
+        uint8_t year = bcdToDec(replyData[14]);
+        uint8_t hour = bcdToDec(replyData[15]);
+        uint8_t minute = bcdToDec(replyData[16]);
+        uint8_t second = bcdToDec(replyData[17]);
+        
+        // Format date and time strings
+        char dateStr[12];
+        char timeStr[9];
+        sprintf(dateStr, "%02d.%02d.20%02d", day, month, year);
+        sprintf(timeStr, "%02d:%02d:%02d", hour, minute, second);
+        
+        // Device ID from request parameter
+        int deviceId = request->getParam("ID")->value().toInt();
+        
+        // Build JSON response
+        body = "{";
+        body += "\"status\":\"OK\",";
+        body += "\"device_id\":" + String(deviceId) + ",";
+        body += "\"log_id\":" + String(logId) + ",";
+        body += "\"event_code\":\"0x" + String(logEvent, HEX) + "\",";
+        body += "\"event_name\":\"" + getEventName(logEvent) + "\",";
+        body += "\"event_description\":\"" + getAccessDescription(logEvent, logGroup) + "\",";
+        body += "\"type\":" + String(logType) + ",";
+        body += "\"group\":" + String(logGroup) + ",";
+        body += "\"card_id\":\"" + String(cardIdHex) + "\",";
+        body += "\"date\":\"" + String(dateStr) + "\",";
+        body += "\"time\":\"" + String(timeStr) + "\",";
+        body += "\"timestamp\":\"" + String(dateStr) + " " + String(timeStr) + "\"";
+        body += "}";
+        
+        request->send(200, "application/json", body);
+        return;
+      }
+
+      case CMD_DELETE_LOG:
+      {
+        // Response format: [CMD][Status][device_addr_H][device_addr_L]
+        // Status byte: 0 = LOGGER_OK, 1 = LOGGER_EMPTY
+        // Total: 4 bytes
+        if (replyDataLength < 4)
+        {
+          body += "Invalid response length (expected 4, got " + String(replyDataLength) + ")";
+          break;
+        }
+        
+        uint8_t status = replyData[1];  // LOGGER_OK=0, LOGGER_EMPTY=1
+        int deviceId = request->getParam("ID")->value().toInt();
+        
+        // Build JSON response
+        body = "{";
+        body += "\"status\":\"" + String(status == 0 ? "OK" : "EMPTY") + "\",";
+        body += "\"device_id\":" + String(deviceId) + ",";
+        body += "\"message\":\"" + String(status == 0 ? "Log deleted successfully" : "Log list is empty") + "\"";
+        body += "}";
+        
+        request->send(200, "application/json", body);
+        return;
+      }
+      
+      case CMD_SET_LANG:
+        body += "Language Set OK";
+        break;
+
+      case CMD_QR_CODE_SET:
+        if (replyDataLength >= 2 && replyData[1] == 0x06) // ACK
+            body += "QR Code Set OK";
+        else
+            body += "QR Code Set FAILED";
+        break;
+
+      case CMD_GET_ROOM_STATUS:
+        if (replyDataLength >= 2) {
+            bool cardIn = replyData[1];
+            body += "ROOM_STATUS=" + String(cardIn ? "GUEST_IN" : "EMPTY");
+        }
+        break;
+
       case CMD_RESTART_CTRL:
         body += "Controler Restart OK";
+        break;
+      
+      case CMD_SET_SYSID:
+        if (replyDataLength >= 2 && replyData[1] == 0x06) // ACK
+          body += "System ID Set: OK";
+        else
+          body += "System ID Set: FAILED (NAK)";
+        break;
+
+      case CMD_GET_SYSID:
+        if (replyDataLength >= 3)
+        {
+          uint16_t sysidVal = (replyData[1] << 8) | replyData[2];
+          char hexStr[10];
+          sprintf(hexStr, "0x%04X", sysidVal);
+          body += "System ID: " + String(sysidVal) + " (" + String(hexStr) + ")";
+        }
+        else
+        {
+          body += "Get System ID: ERROR (Invalid Length)";
+        }
         break;
 
       default:
@@ -2096,7 +2836,12 @@ void loop()
 
   while (Serial2.available()) // Obrada dolaznih bajtova preko Serial2 (RS485)
   {
-    TF_AcceptChar(&tfapp, Serial2.read());
+    // NE čitaj Serial2 ako HTTP handler trenutno čeka odgovor!
+    if (!httpHandlerWaiting) {
+      TF_AcceptChar(&tfapp, Serial2.read());
+    } else {
+      break;  // Pusti HTTP handler da čita
+    }
   }
 
   if (digitalRead(BOOT_PIN) == LOW) // WiFi reset putem dugmeta (BOOT dugme)

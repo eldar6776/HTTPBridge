@@ -14,36 +14,55 @@ opis:		preuzmi sve postavke uređaja
 			
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=GET_STATUS
 
-odgovor: 	WIFI SSID=WiFi0
-			WIFI PASSWORD=23456789
-			mDNS=soba501
-			TCP/IP Port=8020
-			TCP/IP Address=192.168.88.72
-			Current Time (UTC)=: 2025-06-05 15:41:00
-			Timezone Offset=120 min
-			Daylight Saving Time=YES
-			Light Relay State=OFF
-			TIMERON=SUNSET
-			TIMEROFF=SUNRISE
-			ONTIME=00:00
-			OFFTIME=00:00
-			SUNRISE=05:05
-			SUNSET=20:24
-			Ping Watchdog=ENABLED
-			ESP Pin States:
-			GPIO12=LOW
-			GPIO13=LOW
-			...
-			ESP Thermostat State:
-			Temp=24.6*C
-			Setpoint=20.0*C
-			Diff=0.5*C
-			Mode=COOLING
-			FC Pump / Valve=ON
-			Floor Pump=OFF
-			Fan=MEDIUM
-			EMA Filter=0.5
-			Fluid=25.8*C
+odgovor: 	{
+				"status": "success",
+				"message": "System status retrieved",
+				"data": {
+					"wifi": {
+					"ssid": "WiFi0",
+					"password": "23456789",
+					"mdns": "soba504",
+					"ip": "192.168.88.83",
+					"port": 8020
+					},
+					"time": {
+					"utc": "2026-01-30 09:31:44",
+					"timezone_offset_minutes": 60,
+					"dst_active": false
+					},
+					"sun": {
+					"sunrise": "07:05",
+					"sunset": "16:54"
+					},
+					"light": {
+					"relay_state": "OFF",
+					"control_mode": "AUTO",
+					"timer_on_type": "OFF",
+					"timer_off_type": "OFF",
+					"on_time": "00:00",
+					"off_time": "00:00"
+					},
+					"ping_watchdog": false,
+					"thermostat": {
+					"temperature": 0,
+					"setpoint": 25,
+					"threshold": 0.5,
+					"mode": "OFF",
+					"valve": "OFF",
+					"fan": "OFF",
+					"ema_alpha": 0.2,
+					"fluid_temp": -999,
+					"fluid_available": false
+					},
+					"sos": {
+					"active": false
+					},
+					"ir": {
+					"protocol_id": 20,
+					"protocol_name": "GREE"
+					}
+				}
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -58,7 +77,15 @@ opis:		traži trenutnu ip adresu direktno od uređeja. pristup ip
 			
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=GET_IP_ADDRESS
 
-odgovor: 	TCP/IP Address = 192.168.88.72
+odgovor: 	{
+			  "status": "success",
+			  "message": "IP address retrieved",
+			  "data": {
+			    "ip": "192.168.88.72",
+			    "subnet": "255.255.255.0",
+			    "gateway": "192.168.88.1"
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -73,8 +100,25 @@ opis:		preuzmi trenutne postavke za wifi konekciju SSID i PASSWORD
 
 primjer: 	http://soba505.local:8021/sysctrl.cgi?CMD=GET_SSID_PSWRD
 
-odgovor: 	SSID = WiFi0
-			PASSWORD = 23456789 ili PASSWORD = Not Set (OPEN NETWORK)
+odgovor: 	{
+			  "status": "success",
+			  "message": "WiFi credentials retrieved",
+			  "data": {
+			    "ssid": "WiFi0",
+			    "password": "23456789",
+			    "open_network": false
+			  }
+			}
+			ili za otvorenu mrežu:
+			{
+			  "status": "success",
+			  "message": "WiFi credentials retrieved",
+			  "data": {
+			    "ssid": "WiFi0",
+			    "password": "",
+			    "open_network": true
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -87,7 +131,13 @@ opis:		preuzmi mDNS alias uređaja na mreži, ovo je ispis iz flash
 
 primjer: 	http://soba505.local:8021/sysctrl.cgi?CMD=GET_MDNS_NAME
 
-odgovor: 	mDNS = soba505
+odgovor: 	{
+			  "status": "success",
+			  "message": "mDNS name retrieved",
+			  "data": {
+			    "mdns": "soba505"
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -100,7 +150,13 @@ opis:		preuzmi port uređaja na mreži, ovo je ispis iz flash memorije
 
 primjer: 	http://soba505.local:8021/sysctrl.cgi?CMD=GET_TCPIP_PORT
 
-odgovor: 	TCP/IP Port = 8021
+odgovor: 	{
+			  "status": "success",
+			  "message": "TCP/IP port retrieved",
+			  "data": {
+			    "port": 8021
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -108,12 +164,42 @@ odgovor: 	TCP/IP Port = 8021
 komanda:	GET_ROOM_TEMP
 
 opis:		upit trenutne i zadane temperature sobe, bitno je adresirati
-			kontroler sa senzorom temperature t.j. termostat u sobi
+			kontroler sa senzorom temperature t.j. termostat u sobi.
+			Ovisno o uređaju koji odgovara (RS485 termostat ili RS485 scene
+			kontroler), odgovor će sadržavati različit broj podataka.
+			RS485 scene kontroler vraća samo sobnu i zadanu temperaturu,
+			dok RS485 termostat vraća punu strukturu podataka.
 
 primjer: 	http://soba505.local:8021/sysctrl.cgi?CMD=GET_ROOM_TEMP&ID=92
 
-odgovor: 	Room Temperature = 26*C
-			Setpoint Temperature = 24*C
+odgovor: 	**Za RS485 scene kontroler (kraći odgovor):**
+			{
+			  "status": "success",
+			  "message": "Room temperature retrieved",
+			  "data": {
+			    "room_temperature": 26,
+			    "setpoint_temperature": 24
+			  }
+			}
+			
+			**Za RS485 termostat (duži odgovor):**
+			{
+			  "status": "success",
+			  "message": "Room temperature retrieved",
+			  "data": {
+			    "room_temperature": 26,
+			    "setpoint_temperature": 24,
+			    "fan_speed": 1,
+			    "thermostat_control_mode": 2,
+			    "setpoint_max": 30,
+			    "setpoint_min": 18,
+			    "fan_control_mode": 0,
+			    "forward_heating": true,
+			    "forward_cooling": false,
+			    "thst_enable_heating": true,
+			    "thst_enable_cooling": false
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -125,7 +211,13 @@ opis:		preuzmi podešenu temperaturu sobe kada gost uđe sa karticom,
 
 primjer: 	http://soba505.local:8021/sysctrl.cgi?CMD=GET_GUEST_IN_TEMP&ID=201
 
-odgovor: 	Guest In Temperature = 22*C
+odgovor: 	{
+			  "status": "success",
+			  "message": "Guest in temperature retrieved",
+			  "data": {
+			    "guest_in_temperature": 22
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -138,7 +230,13 @@ opis:		preuzmi podešenu temperaturu sobe kada gost izvadi karticu
 
 primjer: 	http://soba505.local:8021/sysctrl.cgi?CMD=GET_GUEST_OUT_TEMP&ID=201
 
-odgovor: 	Guest Out Temperature = 18*C
+odgovor: 	{
+			  "status": "success",
+			  "message": "Guest out temperature retrieved",
+			  "data": {
+			    "guest_out_temperature": 18
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -149,7 +247,13 @@ opis:		preuzmi podešenu temperaturnu diferencu termostata
 
 primjer: 	http://soba505.local:8021/sysctrl.cgi?CMD=GET_FAN_DIFFERENCE&ID=200
 
-odgovor: 	Fan Difference = 0*C
+odgovor: 	{
+			  "status": "success",
+			  "message": "Fan difference retrieved",
+			  "data": {
+			    "fan_difference": 0
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -161,8 +265,14 @@ opis:		preuzmi podešeni lo i high band termostata za kontrolu
 
 primjer: 	http://soba505.local:8021/sysctrl.cgi?CMD=GET_FAN_BAND&ID=200
 
-odgovor: 	Fan Low Band = 1*C
-			Fan High Band = 2*C
+odgovor: 	{
+			  "status": "success",
+			  "message": "Fan band retrieved",
+			  "data": {
+			    "fan_low_band": 1,
+			    "fan_high_band": 2
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -194,7 +304,13 @@ opis:		preuzmi trenutno stanje izlaznih pinova sobnih kontrolera,
 
 primjer: 	http://soba505.local:8021/sysctrl.cgi?CMD=GET_PINS&ID=200
 
-odgovor: 	Pins States = 00100000
+odgovor: 	{
+			  "status": "success",
+			  "message": "Pin states retrieved",
+			  "data": {
+			    "pin_states": "00100000"
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -205,10 +321,16 @@ opis:		preuzmi RTC vrijeme sa ESP-a
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=GET_TIME
 
-odgovor: 	DATE=2025-06-02
-			TIME=15:28:16
-			DAY=Monday
-			EPOCH=1748870896
+odgovor: 	{
+			  "status": "success",
+			  "message": "Current time retrieved",
+			  "data": {
+			    "date": "02.06.2025",
+			    "time": "15:28:16",
+			    "day": "Monday",
+			    "epoch": 1748870896
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -219,14 +341,20 @@ opis:		preuzmi postavke timera vanjske rasvjete
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=GET_TIMER
 
-odgovor: 	TIMERON=SUNSET
-			TIMEROFF=SUNRISE
-			ONTIME=0000
-			OFFTIME=0000
-			SUNRISE=05:06
-			SUNSET=20:23
-			Light Relay State : OFF
-			DST=1
+odgovor: 	{
+			  "status": "success",
+			  "message": "Timer settings retrieved",
+			  "data": {
+			    "timer_on": "SUNSET",
+			    "timer_off": "SUNRISE",
+			    "on_time": "0000",
+			    "off_time": "0000",
+			    "sunrise": "05:06",
+			    "sunset": "20:23",
+			    "relay_state": "OFF",
+			    "dst_active": true
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -237,7 +365,13 @@ opis:		stanje ping watchdog servisa.
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=GET_PINGWDG
 
-odgovor: 	Ping Watchdog State : ON
+odgovor: 	{
+			  "status": "success",
+			  "message": "Ping watchdog state retrieved",
+			  "data": {
+			    "enabled": true
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -254,7 +388,13 @@ opis:		podesi podatke za wifi konekciju. ukoliko je mreža otvorenog
 primjer: 	http://soba505.local:8021/sysctrl.cgi?CMD=SET_SSID_PSWRD&SSID=WiFi0&PSWRD=23456789
 			http://soba505.local:8021/sysctrl.cgi?CMD=SET_SSID_PSWRD&SSID=WiFi0
 
-odgovor: 	WIFI SSID & PASSWORD Setup OK
+odgovor: 	{
+			  "status": "success",
+			  "message": "WiFi credentials saved",
+			  "data": {
+			    "ssid": "WiFi0"
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -270,7 +410,13 @@ opis:		promjeni multicast DNS ime uređaja. ovo je upis u memoriju
 
 primjer: 	http://soba505.local:8021/sysctrl.cgi?CMD=SET_MDNS_NAME&MDNS=soba501
 
-odgovor: 	mDNS Setup OK
+odgovor: 	{
+			  "status": "success",
+			  "message": "mDNS name saved",
+			  "data": {
+			    "mdns": "soba501"
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -284,7 +430,13 @@ opis:		promjeni tcp/ip port za pristp uređaju. ovaj port se koristi
 
 primjer: 	http://soba501.local:8021/sysctrl.cgi?CMD=SET_TCPIP_PORT&PORT=8020
 
-odgovor: 	TCP/IP Port Setup OK
+odgovor: 	{
+			  "status": "success",
+			  "message": "TCP/IP port saved",
+			  "data": {
+			    "port": 8020
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -297,7 +449,13 @@ opis:		podesi temperaturu sobe. nije bitno da li se adresira kontroler
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=SET_ROOM_TEMP&ID=92&VALUE=30
 
-odgovor: 	Temperature set OK
+odgovor: 	{
+			  "status": "success",
+			  "message": "Temperature set OK",
+			  "data": {
+			    "result": "Temperature set OK"
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -310,7 +468,13 @@ opis:		podesi temperaturu termostata kada se ubaci kartica u odlagač.
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=SET_GUEST_IN_TEMP&ID=201&VALUE=22
 
-odgovor: 	Temperature set OK
+odgovor: 	{
+			  "status": "success",
+			  "message": "Temperature set OK",
+			  "data": {
+			    "result": "Temperature set OK"
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -323,7 +487,13 @@ opis:		podesi temperaturu termostata kada se izvadi kartica iz odlagača.
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=SET_GUEST_OUT_TEMP&ID=201&VALUE=17
 
-odgovor: 	Temperature set OK
+odgovor: 	{
+			  "status": "success",
+			  "message": "Temperature set OK",
+			  "data": {
+			    "result": "Temperature set OK"
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -335,7 +505,13 @@ opis:		podesi termostat na režim grijanja.nije bitno da li se adresira
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=SET_THST_HEATING&ID=200
 
-odgovor: 	Thermostat set OK
+odgovor: 	{
+			  "status": "success",
+			  "message": "Thermostat set OK",
+			  "data": {
+			    "result": "Thermostat set OK"
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -347,7 +523,13 @@ opis:		podesi termostat na režim hlađenja.nije bitno da li se adresira
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=SET_THST_COOLING&ID=201
 
-odgovor: 	Thermostat set OK
+odgovor: 	{
+			  "status": "success",
+			  "message": "Thermostat set OK",
+			  "data": {
+			    "result": "Thermostat set OK"
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -362,7 +544,13 @@ opis:		aktiviraj termostat. slanje ove komande uvijek termostat prebacuje
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=SET_THST_ON&ID=201
 
-odgovor: 	Thermostat set OK
+odgovor: 	{
+			  "status": "success",
+			  "message": "Thermostat set OK",
+			  "data": {
+			    "result": "Thermostat set OK"
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -374,7 +562,13 @@ opis:		isključi termostat. nije bitno da li se adresira kontroler
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=SET_THST_OFF&ID=200
 
-odgovor: 	Thermostat set OK
+odgovor: 	{
+			  "status": "success",
+			  "message": "Thermostat set OK",
+			  "data": {
+			    "result": "Thermostat set OK"
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -392,7 +586,91 @@ opis:		setuj izlazni pin kontrolera u sobi.  koristiti sa oprezom !!!
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=SET_PIN&ID=200&PIN=1&VALUE=1
 
-odgovor: 	Pin Set OK
+odgovor: 	{
+			  "status": "success",
+			  "message": "Pin set OK",
+			  "data": {
+			    "result": "Pin set OK"
+			  }
+			}
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	SET_FWD_HEATING
+
+opis:		omogući/onemogući automatsko prosleđivanje podataka sa termostata 
+			na drugi uređaj kada je termostat u režimu grijanja. Kada je flag 
+			uključen (VALUE=1), svaka promjena temperature ili kontrole termostata 
+			u režimu grijanja se automatski prosleđuje na upareni uređaj.
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=SET_FWD_HEATING&ID=200&VALUE=1
+
+odgovor: 	{
+			  "status": "success",
+			  "data": {
+			    "result": "Forward heating flag set",
+			    "value": true
+			  }
+			}
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	SET_FWD_COOLING
+
+opis:		omogući/onemogući automatsko prosleđivanje podataka sa termostata 
+			na drugi uređaj kada je termostat u režimu hlađenja. Kada je flag 
+			uključen (VALUE=1), svaka promjena temperature ili kontrole termostata 
+			u režimu hlađenja se automatski prosleđuje na upareni uređaj.
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=SET_FWD_COOLING&ID=200&VALUE=1
+
+odgovor: 	{
+			  "status": "success",
+			  "data": {
+			    "result": "Forward cooling flag set",
+			    "value": true
+			  }
+			}
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	SET_ENABLE_HEATING
+
+opis:		omogući/onemogući grijanje na termostatu. Kada je onemogućeno (VALUE=0),
+			termostat neće aktivirati grijanje čak ni kada se podesi u režim grijanja.
+			Koristi se za centralno isključivanje grijanja u ljetnom periodu.
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=SET_ENABLE_HEATING&ID=200&VALUE=0
+
+odgovor: 	{
+			  "status": "success",
+			  "data": {
+			    "result": "Enable heating flag set",
+			    "value": false
+			  }
+			}
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	SET_ENABLE_COOLING
+
+opis:		omogući/onemogući hlađenje na termostatu. Kada je onemogućeno (VALUE=0),
+			termostat neće aktivirati hlađenje čak ni kada se podesi u režim hlađenja.
+			Koristi se za centralno isključivanje hlađenja u zimskom periodu.
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=SET_ENABLE_COOLING&ID=200&VALUE=0
+
+odgovor: 	{
+			  "status": "success",
+			  "data": {
+			    "result": "Enable cooling flag set",
+			    "value": false
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -405,7 +683,13 @@ opis:		jednostavna komanda za otvaranje vrata. automatski šalje potrebne
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=OPEN_DOOR&ID=501
 
-odgovor: 	Door Opened
+odgovor: 	{
+			  "status": "success",
+			  "message": "Door opened",
+			  "data": {
+			    "result": "Door opened"
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -422,7 +706,13 @@ primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=SET_PASSWORD&ID=501&TYPE=GUE
 			http://soba501.local:8020/sysctrl.cgi?CMD=SET_PASSWORD&ID=501&TYPE=MAID&PASSWORD=5678
 			http://soba501.local:8020/sysctrl.cgi?CMD=SET_PASSWORD&ID=501&TYPE=DELETE_GUEST&GUEST_ID=1&PASSWORD=0000
 
-odgovor: 	Password Set OK
+odgovor: 	{
+			  "status": "success",
+			  "message": "Password set OK",
+			  "data": {
+			    "result": "Password set OK"
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -435,9 +725,26 @@ opis:		provjeri status lozinke. zahtijeva TYPE parametar.
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=GET_PASSWORD&ID=501&TYPE=GUEST&GUEST_ID=1
 			http://soba501.local:8020/sysctrl.cgi?CMD=GET_PASSWORD&ID=501&TYPE=MAID
 
-odgovor: 	Guest ID: 1
-			Password: 1234
-			Expiry: 2027-01-01 12:00
+odgovor: 	za GUEST tip:
+			{
+			  "status": "success",
+			  "message": "Password retrieved",
+			  "data": {
+			    "user_type": "guest",
+			    "guest_id": 1,
+			    "password": 1234,
+			    "expiry": "2027-01-01 12:00"
+			  }
+			}
+			za STAFF tip:
+			{
+			  "status": "success",
+			  "message": "Password retrieved",
+			  "data": {
+			    "user_type": "staff",
+			    "password": 5678
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -450,18 +757,21 @@ primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=READ_LOG&ID=501
 
 odgovor: 	JSON Struktura:
 			{
-			  "status": "OK",           // ili "EMPTY"
-			  "device_id": 501,
-			  "log_id": 1234,
-			  "event_code": "0xDC",
-			  "event_name": "GUEST_CARD",
-			  "event_description": "Gost usao karticom",
-			  "type": 1,
-			  "group": 1,
-			  "card_id": "FFFFFFFFFFFF",
-			  "date": "05.06.2025",
-			  "time": "15:30:00",
-			  "timestamp": "05.06.2025 15:30:00"
+				"status": "success",
+				"data": {
+					"status": "OK",
+					"device_id": 154,
+					"log_id": 636,
+					"event_code": "0xf7",
+					"event_name": "PASSWORD_VALID",
+					"event_description": "Korisnik usao PIN-om",
+					"type": 0,
+					"group": 83,
+					"card_id": "0000000000",
+					"date": "27.01.2026",
+					"time": "14:13:18",
+					"timestamp": "27.01.2026 14:13:18"
+				}
 			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -475,9 +785,12 @@ primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=DELETE_LOG&ID=501
 
 odgovor: 	JSON Struktura:
 			{
-			  "status": "OK",           // ili "EMPTY"
-			  "device_id": 501,
-			  "message": "Log deleted successfully" // ili "Log list is empty"
+				"status": "success",
+				"message": "Log deleted successfully",
+				"data": {
+					"status": "OK",
+					"device_id": 154
+				}
 			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -491,7 +804,10 @@ opis:		restart http_rs485 bridge uređaja sobe (esp-a). nakon promjena
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=RESTART
 
-odgovor: 	Restart in 3s
+odgovor: 	{
+			  "status": "success",
+			  "message": "Restart in 3s"
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -503,7 +819,13 @@ opis:		restartuj kontroler na rs485 busu. komanda je implementirana
 			
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=RESTART_CTRL&ID=92
 
-odgovor: 	Controler Restart OK
+odgovor: 	{
+			  "status": "success",
+			  "message": "Controller restart OK",
+			  "data": {
+			    "result": "Controller restart OK"
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -515,7 +837,14 @@ opis:		podesi RTC vrijeme na ESP-a ručno ukoliko nije dostaupan
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=SET_TIME&DATE=020625&TIME=120000
 
-odgovor: 	RTC Date & Time Set OK.
+odgovor: 	{
+			  "status": "success",
+			  "message": "RTC date and time set successfully",
+			  "data": {
+			    "date": "020625",
+			    "time": "120000"
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -541,7 +870,16 @@ primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=SET_TIMER&TIMERON=SUNSET&TIM
 			http://soba501.local:8020/sysctrl.cgi?CMD=SET_TIMER&TIMERON=2030&TIMEROFF=0630
 			http://soba501.local:8020/sysctrl.cgi?CMD=SET_TIMER&TIMERON=OFF&TIMEROFF=OFF
 
-odgovor: 	Timer Set OK
+odgovor: 	{
+			  "status": "success",
+			  "message": "Timer set successfully",
+			  "data": {
+			    "timer_on": "SUNSET",
+			    "timer_off": "SUNRISE",
+			    "on_time": "0000",
+			    "off_time": "0000"
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -555,7 +893,13 @@ opis:		override timera - uključenje releja rasvjete. u svakom trenutku
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=OUTDOOR_LIGHT_ON
 
-odgovor: 	Outdoor Lights Set: ON
+odgovor: 	{
+			  "status": "success",
+			  "message": "Outdoor light state changed",
+			  "data": {
+			    "state": "ON"
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -569,7 +913,13 @@ opis:		override timera - isključenje releja rasvjete. u svakom trenutku
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=OUTDOOR_LIGHT_OFF
 
-odgovor: 	Outdoor Lights Set: OFF
+odgovor: 	{
+			  "status": "success",
+			  "message": "Outdoor light state changed",
+			  "data": {
+			    "state": "OFF"
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -581,7 +931,13 @@ opis:		omogući ping google servera svakih 60s, nakon 10 propalih
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=PINGWDG_ON
 
-odgovor: 	Ping Watchdog State : ON
+odgovor: 	{
+			  "status": "success",
+			  "message": "Ping watchdog enabled",
+			  "data": {
+			    "enabled": true
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -592,7 +948,13 @@ opis:		onemogući ping watchdog ako mreža nema pritup internetu
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=PINGWDG_OFF
 
-odgovor: 	Ping Watchdog State : OFF
+odgovor: 	{
+			  "status": "success",
+			  "message": "Ping watchdog disabled",
+			  "data": {
+			    "enabled": false
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -607,15 +969,16 @@ opis:		preuzmi postavke termostata na ESP modulu. onewire senzor
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=TH_STATUS
 
-odgovor: 	Temp=26.0*C
-			Setpoint=20.0*C
-			Diff=0.5*C
-			Mode=COOLING
-			FC Pump / Valve=ON
-			Floor Pump=OFF
-			Fan=HIGH
-			EMA=0.5
-			Fluid=25.8*C
+odgovor: 	{
+			  "status": "success",
+			  "message": "Thermostat status retrieved",
+			  "data": {
+			    "status_text": "Temp=26.0*C\nSetpoint=20.0*C\nDiff=0.5*C\nMode=COOLING\nFC Pump / Valve=ON\nFloor Pump=OFF\nFan=HIGH",
+			    "ema_alpha": 0.5,
+			    "fluid_temp": 25.8,
+			    "fluid_available": true
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -626,7 +989,13 @@ opis:		podesi setpoint termostata na ESP modulu
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=TH_SETPOINT&VALUE=24
 
-odgovor: 	Thermostat Setpoint set to 22.00
+odgovor: 	{
+			  "status": "success",
+			  "message": "Thermostat setpoint updated",
+			  "data": {
+			    "setpoint": 24.0
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -643,7 +1012,13 @@ opis:		podesi diferencu termostata na ESP modulu u decimalnom formatu
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=TH_DIFF&VALUE=5
 
-odgovor: 	Thermostat Difference set to 0.5*C
+odgovor: 	{
+			  "status": "success",
+			  "message": "Thermostat threshold updated",
+			  "data": {
+			    "threshold": 0.5
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -654,7 +1029,13 @@ opis:		uključi termostat na ESP modulu u modu grijanja
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=TH_HEATING
 
-odgovor: 	Mode set to HEATING
+odgovor: 	{
+			  "status": "success",
+			  "message": "Thermostat mode set to HEATING",
+			  "data": {
+			    "mode": "HEATING"
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -665,7 +1046,13 @@ opis:		uključi termostat na ESP modulu u modu hlađenja
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=TH_COOLING
 
-odgovor: 	Mode set to COOLING
+odgovor: 	{
+			  "status": "success",
+			  "message": "Thermostat mode set to COOLING",
+			  "data": {
+			    "mode": "COOLING"
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -676,7 +1063,14 @@ opis:		uključi termostat na ESP modulu u zadnjem odabranom modu rada
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=TH_ON
 
-odgovor: 	Thermostat resumed, mode: COOLING
+odgovor: 	{
+			  "status": "success",
+			  "message": "Thermostat turned ON",
+			  "data": {
+			    "mode": "COOLING",
+			    "state": "ON"
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -687,7 +1081,13 @@ opis:		isključi termostat na ESP modulu
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=TH_OFF
 
-odgovor: 	Thermostat turned OFF
+odgovor: 	{
+			  "status": "success",
+			  "message": "Thermostat turned OFF",
+			  "data": {
+			    "state": "OFF"
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -702,7 +1102,13 @@ opis:		podesi EMA (Exponential Moving Average) filter mjerene temperature.
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=TH_EMA&VALUE=5
 
-odgovor: 	EMA filter set to 0.5
+odgovor: 	{
+			  "status": "success",
+			  "message": "EMA filter updated",
+			  "data": {
+			    "ema_alpha": 0.5
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -720,13 +1126,13 @@ opis:		stanje slobodnih pinova na ESP modulu. pinovi koji su
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=ESP_GET_PINS
 
-odgovor: 	GPIO12=LOW
-			GPIO15=HIGH
-			GPIO21=LOW
-			GPIO22=LOW
-			GPIO34=LOW
-			GPIO35=LOW
-			GPIO36=LOW
+odgovor: 	{
+			  "status": "success",
+			  "message": "ESP32 pins status retrieved",
+			  "data": {
+			    "pins_status": "Available: 12,15,21,22,34,35,36\nGPIO12=LOW\nGPIO15=HIGH\nGPIO21=LOW\nGPIO22=LOW\nGPIO34=LOW\nGPIO35=LOW\nGPIO36=LOW"
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -741,7 +1147,14 @@ opis:		setuj slobodan pin (HIGH) na ESP modulu. pin mora biti validan
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=ESP_SET_PIN&PIN=22
 
-odgovor: 	PIN set HIGH
+odgovor: 	{
+			  "status": "success",
+			  "message": "PIN set HIGH",
+			  "data": {
+			    "pin": 22,
+			    "state": "HIGH"
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -756,7 +1169,14 @@ opis:		resetuj slobodan pin (LOW) na ESP modulu. pin mora biti validan
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=ESP_RESET_PIN&PIN=22
 
-odgovor: 	PIN set LOW
+odgovor: 	{
+			  "status": "success",
+			  "message": "PIN set LOW",
+			  "data": {
+			    "pin": 22,
+			    "state": "LOW"
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -776,7 +1196,14 @@ opis:		puls na slobodnom pinu (HIGH -> pauza -> LOW) na ESP modulu.
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=ESP_PULSE_PIN&PIN=22
 			http://soba501.local:8020/sysctrl.cgi?CMD=ESP_PULSE_PIN&PIN=22&PAUSE=10
 
-odgovor: 	PIN Puslsed
+odgovor: 	{
+			  "status": "success",
+			  "message": "PIN pulsed",
+			  "data": {
+			    "pin": 22,
+			    "duration_seconds": 2
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -788,7 +1215,13 @@ opis:		podesi jezik na kontroleru.
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=SET_LANG&ID=501&VALUE=1
 
-odgovor: 	Language Set OK
+odgovor: 	{
+			  "status": "success",
+			  "message": "Language set OK",
+			  "data": {
+			    "result": "Language set OK"
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -800,7 +1233,21 @@ opis:		postavi QR kod na kontroleru. ID kontrolera mora biti validan.
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=QR_CODE_SET&ID=501&QR_CODE=WIFI:S:MyNet;T:WPA;P:1234;;
 
-odgovor: 	QR Code Set OK  (ili QR Code Set FAILED)
+odgovor: 	{
+			  "status": "success",
+			  "message": "QR code set OK",
+			  "data": {
+			    "result": "QR code set OK"
+			  }
+			}
+			ili u slučaju greške:
+			{
+			  "status": "success",
+			  "message": "QR code set FAILED",
+			  "data": {
+			    "result": "QR code set FAILED"
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -811,7 +1258,13 @@ opis:		pročitaj QR kod sa kontrolera.
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=QR_CODE_GET&ID=501
 
-odgovor: 	QR_CODE=WIFI:S:MyNet;T:WPA;P:1234;;
+odgovor: 	{
+			  "status": "success",
+			  "message": "QR code retrieved",
+			  "data": {
+			    "qr_code": "WIFI:S:MyNet;T:WPA;P:1234;;"
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -822,7 +1275,14 @@ opis:		pročitaj sistemski ID kontrolera.
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=GET_SYSID&ID=501
 
-odgovor: 	System ID: 12345 (0x3039)
+odgovor: 	{
+			  "status": "success",
+			  "message": "System ID retrieved",
+			  "data": {
+			    "system_id": 12345,
+			    "system_id_hex": "0x3039"
+			  }
+			}
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -834,7 +1294,60 @@ opis:		postavi sistemski ID kontrolera.
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=SET_SYSID&ID=501&VALUE=12345
 
-odgovor: 	System ID Set: OK
+odgovor: 	{
+			  "status": "success",
+			  "message": "System ID set OK",
+			  "data": {
+			    "result": "System ID set OK"
+			  }
+			}
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	GET_VERSION
+
+opis:		bez ID parametra: preuzmi firmware verziju ESP32 uređaja.
+			sa ID parametrom: preuzmi firmware verzije STM32 kontrolera sa 
+			svih 5 regiona memorije (bootloader, aplikacija, backup bootloader,
+			backup aplikacija, i novi fajl). Verzije koje nisu programirane
+			ili su neispravne vraćaju se kao null. Format verzije je 0xTTDDDDDD
+			gdje je TT tip firmware-a (0x31=bootloader, 0x32=aplikacija),
+			a DDDDDD je datum u formatu GGMMDD.
+
+primjer 1: 	http://soba501.local:8020/sysctrl.cgi?CMD=GET_VERSION
+
+odgovor 1: 	{
+			  "status": "success",
+			  "message": "ESP32 firmware version retrieved",
+			  "data": {
+			    "device_type": "ESP32",
+			    "firmware_version": "1.0.8",
+			    "build_number": 8,
+			    "build_date": "2026-01-30 14:03:52"
+			  }
+			}
+
+primjer 2: 	http://soba501.local:8020/sysctrl.cgi?CMD=GET_VERSION&ID=154
+
+odgovor 2: 	{
+			  "status": "success",
+			  "message": "Command executed successfully",
+			  "data": {
+			    "bootloader_version": "0x31260129",
+			    "application_version": "0x31260201",
+			    "bootloader_backup_version": null,
+			    "application_backup_version": null,
+			    "new_file_version": null
+			  }
+			}
+
+napomena:	0x31260129 dekodira se kao:
+			  - 0x31 = tip 31 (bootloader)
+			  - 0x260129 = datum 26.01.29 (29. januar 2026.)
+			
+			0x00000000 znači da firmware nije programiran ili je neispravan.
+			Koristi se za verifikaciju OTA update procesa.
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
 ----------------------------------------------------------------------
@@ -845,4 +1358,373 @@ opis:		pročitaj status sobe (Card Stacker status).
 
 primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=GET_ROOM_STATUS&ID=501
 
-odgovor: 	ROOM_STATUS=GUEST_IN (ili EMPTY)
+odgovor: 	{
+			  "status": "success",
+			  "message": "Room status retrieved",
+			  "data": {
+			    "room_status": "GUEST_IN",
+			    "card_inserted": true
+			  }
+			}
+			ili kada je soba prazna:
+			{
+			  "status": "success",
+			  "message": "Room status retrieved",
+			  "data": {
+			    "room_status": "EMPTY",
+			    "card_inserted": false
+			  }
+			}
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	SOS_RESET
+
+opis:		resetuj SOS status alarma. Briše SOS događaj iz memorije i 
+			resetuje status varijablu. Koristi se nakon što je osoblje
+			reagovalo na SOS poziv.
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=SOS_RESET
+
+odgovor: 	{
+			  "status": "success",
+			  "message": "SOS event cleared from memory"
+			}
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	SET_IR_PROTOCOL
+
+opis:		Podesi IR protokol za kontrolu klima uređaja. 
+			Ova komanda definiše koji set IR kodova će se koristiti za
+			slanje signala putem IR emitera. Postavka se čuva u trajnoj
+			memoriji i ostaje aktivna nakon restarta.
+			
+			Parametar VALUE je numerički ID protokola (decode_type_t).
+			Lista svih podržanih protokola i njihove vrijednosti:
+			
+			1 = RC5
+			2 = RC6
+			3 = NEC
+			4 = SONY
+			5 = PANASONIC
+			6 = JVC
+			7 = SAMSUNG
+			8 = WHYNTER
+			9 = AIWA_RC_T501
+			10 = LG
+			11 = SANYO
+			12 = MITSUBISHI
+			13 = DISH
+			14 = SHARP
+			15 = COOLIX
+			16 = DAIKIN
+			17 = DENON
+			18 = KELVINATOR
+			19 = SHERWOOD
+			20 = MITSUBISHI_AC
+			21 = RCMM
+			22 = SANYO_LC7461
+			23 = RC5X
+			24 = GREE
+			25 = PRONTO
+			26 = NEC_LIKE
+			27 = ARGO
+			28 = TROTEC
+			29 = NIKAI
+			30 = RAW
+			31 = GLOBALCACHE
+			32 = TOSHIBA_AC
+			33 = FUJITSU_AC
+			34 = MIDEA
+			35 = MAGIQUEST
+			36 = LASERTAG
+			37 = CARRIER_AC
+			38 = HAIER_AC
+			39 = MITSUBISHI2
+			40 = HITACHI_AC
+			41 = HITACHI_AC1
+			42 = HITACHI_AC2
+			43 = GICABLE
+			44 = HAIER_AC_YRW02
+			45 = WHIRLPOOL_AC
+			46 = SAMSUNG_AC
+			47 = LUTRON
+			48 = ELECTRA_AC
+			49 = PANASONIC_AC
+			50 = PIONEER
+			51 = LG2
+			52 = MWM
+			53 = DAIKIN2
+			54 = VESTEL_AC
+			55 = TECO
+			56 = SAMSUNG36
+			57 = TCL112AC
+			58 = LEGOPF
+			59 = MITSUBISHI_HEAVY_88
+			60 = MITSUBISHI_HEAVY_152
+			61 = DAIKIN216
+			62 = SHARP_AC
+			63 = GOODWEATHER
+			64 = INAX
+			65 = DAIKIN160
+			66 = NEOCLIMA
+			67 = DAIKIN176
+			68 = DAIKIN128
+			69 = AMCOR
+			70 = DAIKIN152
+			71 = MITSUBISHI136
+			72 = MITSUBISHI112
+			73 = HITACHI_AC424
+			74 = SONY_38K
+			75 = EPSON
+			76 = SYMPHONY
+			77 = HITACHI_AC3
+			78 = DAIKIN64
+			79 = AIRWELL
+			80 = DELONGHI_AC
+			81 = DOSHISHA
+			82 = MULTIBRACKETS
+			83 = CARRIER_AC40
+			84 = CARRIER_AC64
+			85 = HITACHI_AC344
+			86 = CORONA_AC
+			87 = MIDEA24
+			88 = ZEPEAL
+			89 = SANYO_AC
+			90 = VOLTAS
+			91 = METZ
+			92 = TRANSCOLD
+			93 = TECHNIBEL_AC
+			94 = MIRAGE
+			95 = ELITESCREENS
+			96 = PANASONIC_AC32
+			97 = MILESTAG2
+			98 = ECOCLIM
+			99 = XMP
+			100 = TRUMA
+			101 = HAIER_AC176
+			102 = TEKNOPOINT
+			103 = KELON
+			104 = TROTEC_3550
+			105 = SANYO_AC88
+			106 = BOSE
+			107 = ARRIS
+			108 = RHOSS
+			109 = AIRTON
+			110 = COOLIX48
+			111 = HITACHI_AC264
+			112 = KELON168
+			113 = HITACHI_AC296
+			114 = DAIKIN200
+			115 = HAIER_AC160
+			116 = CARRIER_AC128
+			117 = TOTO
+			118 = CLIMABUTLER
+			119 = TCL96AC
+			120 = BOSCH144
+			121 = SANYO_AC152
+			122 = DAIKIN312
+			123 = GORENJE
+			124 = WOWWEE
+			125 = CARRIER_AC84
+			126 = YORK
+			127 = BLUESTARHEAVY
+			128 = EUROM
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=SET_IR_PROTOCOL&VALUE=20
+
+odgovor: 	{
+			  "status": "success",
+			  "message": "IR protocol set",
+			  "data": {
+			    "protocol_id": 20,
+			    "protocol_name": "GREE"
+			  }
+			}
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	GET_IR_PROTOCOL
+
+opis:		Pročitaj trenutno aktivni IR protokol i njegov naziv.
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=GET_IR_PROTOCOL
+
+odgovor: 	{
+			  "status": "success",
+			  "message": "IR protocol retrieved",
+			  "data": {
+			    "protocol_id": 20,
+			    "protocol_name": "GREE"
+			  }
+			}
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	SET_IR
+
+opis:		Pošalji osnovnu komandu klima uređaju (ON/OFF, Mod, Temperatura).
+			Zahtijeva da je prethodno podešen protokol pomoću SET_IR_PROTOCOL.
+			Brzina ventilatora je uvijek AUTO.
+
+parametri:	MOD - Režim rada: OFF, HEATING, COOLING
+			VALUE - Zadana temperatura (obavezno za HEATING/COOLING, ignoriše se za OFF)
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=SET_IR&MOD=COOLING&VALUE=21
+			http://soba501.local:8020/sysctrl.cgi?CMD=SET_IR&MOD=OFF
+
+odgovor: 	{
+			  "status": "success",
+			  "message": "IR Command Sent",
+			  "data": {
+			    "protocol": "GREE",
+			    "power": "ON",
+			    "mode": "COOLING",
+			    "temp": 21
+			  }
+			}
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+			FIRMWARE UPDATE & FILE SYSTEM API
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	/upload
+
+metod:		POST (multipart/form-data)
+
+opis:		Upload fajla u eksternu flash memoriju. Sistem podržava 8 slotova (0-7).
+			Slotovi 0-3 su za sistemski firmware (validacija verzije i headera).
+			Slotovi 4-7 su za raw binarne fajlove (slike, resursi).
+			Parametar 'slot' se može poslati u URL-u ili kao dio multipart forme.
+			Napomena: Upload velikih fajlova može potrajati.
+
+parametri:	slot (0-7) - Indeks slota u koji se upisuje fajl.
+			file - Binarni sadržaj fajla.
+
+primjer: 	curl -X POST -F "slot=0" -F "file=@firmware.bin" http://soba501.local:8020/upload
+
+odgovor: 	{
+			  "status": "success",
+			  "message": "Upload Complete"
+			}
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	/slots
+
+metod:		GET
+
+opis:		Prikazuje status svih 8 slotova u eksternoj flash memoriji.
+			Vraća informacije o tipu sadržaja, veličini, verziji (za firmware),
+			nazivu fajla (za raw slotove) i validnosti podataka (CRC32).
+
+primjer: 	http://soba501.local:8020/slots
+
+odgovor: 	{
+			  "slots": [
+			    {
+			      "id": 0,
+			      "type": "firmware",
+			      "size": 123456,
+			      "version": 32260201,
+			      "crc32": 2864383858,
+			      "valid": true
+			    },
+			    {
+			      "id": 4,
+			      "type": "raw_binary",
+			      "filename": "image.bin",
+			      "size": 45056,
+			      "crc32": 12345678,
+			      "valid": true
+			    },
+			    ...
+			  ]
+			}
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	/start_update
+
+metod:		POST
+
+opis:		Pokreće proces ažuriranja firmware-a na STM32 kontroleru koristeći
+			podatke iz odabranog slota eksterne flash memorije.
+			Adrese staging memorije su predefinisane:
+			- Slotovi 0-2: Koriste ADDR_FW_STAGING (0x90F00000)
+			- Slotovi 4-6: Koriste ADDR_EXT_FLASH (0x90000000)
+			- Slotovi 3 i 7: Koriste default vrijednosti ali dozvoljavaju override
+			  putem parametra 'staging_addr'.
+
+parametri:	slot (0-7) - Izvor podataka (slot u eksternom flash-u).
+			addr (int) - Odredišna adresa u internoj memoriji STM32 kontrolera.
+			staging_addr (int, opcionalno) - Adresa izvora (samo za slotove 3 i 7).
+
+primjer: 	http://soba501.local:8020/start_update?slot=0&addr=134217728
+
+odgovor: 	{
+			  "status": "success",
+			  "message": "Update Started"
+			}
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	/update_status
+
+metod:		GET
+
+opis:		Vraća trenutni status procesa ažuriranja.
+			State vrijednosti: 0=IDLE, 1=STARTING, 2=ERASING, 3=WRITING, 4=VERIFYING, 5=FINISHED, 6=ERROR.
+
+primjer: 	http://soba501.local:8020/update_status
+
+odgovor: 	{
+			  "active": true,
+			  "state": 3,
+			  "progress": 45,
+			  "lastError": 0
+			}
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	/reset_update
+
+metod:		POST
+
+opis:		Resetuje status servisa za ažuriranje na IDLE. Korisno u slučaju
+			zaglavljenog procesa ili greške.
+
+primjer: 	http://soba501.local:8020/reset_update
+
+odgovor: 	{
+			  "status": "success",
+			  "message": "Update service reset to IDLE"
+			}
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------1
+----------------------------------------------------------------------
+komanda:	/hexdump
+
+metod:		GET
+
+opis:		Debug alat za čitanje sirovog sadržaja iz eksterne flash memorije.
+
+parametri:	slot (0-7) - Indeks slota.
+			offset (int) - Početna adresa čitanja unutar slota.
+			len (int, opcionalno) - Broj bajtova za čitanje (max 1024, default 64).
+
+primjer: 	http://soba501.local:8020/hexdump?slot=0&offset=0&len=128
+
+odgovor: 	(Plain text hex dump)
+			Hex Dump Slot 0 Offset 0:
+			0: FF FF FF FF ...

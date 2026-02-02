@@ -24,6 +24,8 @@
 #include "stm32746g_qspi.h"
 #include "stm32746g_sdram.h"
 #include "stm32746g_eeprom.h"
+#include "firmware_update_agent.h"
+#include "FirmwareDefs.h"
 /* Imported Types  -----------------------------------------------------------*/
 /* Imported Variables --------------------------------------------------------*/
 /* Imported Functions    -----------------------------------------------------*/
@@ -43,12 +45,10 @@ uint8_t sysid[2]     = {0xAB,0xCD};
 
 bool init_tf = false;
 uint32_t rstmr = 0;
-static uint32_t wradd = 0;
-static uint32_t bcnt = 0;
 uint8_t sysid[2];
 uint32_t rsflg, tfbps, dlen, etmr;
 uint8_t cmd = 0;
-uint8_t  ethst, efan,  etsp,  rec, tfifa = 125, tfgra, tfbra, tfgwa;
+uint8_t  ethst, efan,  etsp,  rec, tfgra, tfbra, tfgwa;
 uint8_t GuestPasswordSend = 1;
 
 /* Retry mehanizam */
@@ -60,7 +60,7 @@ volatile bool rs485_msg_acknowledged = false;
 /* Private Function Prototypes -----------------------------------------------*/
 /* Program Code  -------------------------------------------------------------*/
 
-uint8_t responseData[25] = {0}, responseDataLength = 0;
+uint8_t responseData[32] = {0}, responseDataLength = 0;
 uint8_t sendData[10] = {0};
 uint8_t accessTypeID_toSend[4] = {0};
 
@@ -95,7 +95,6 @@ void SendPins(TF_Msg* message)
     message->data = responseData;
     message->len = (TF_LEN) responseDataLength;
 }
-
 
 /**
  * @brief Opens the door (RS_OpenDoor).
@@ -403,6 +402,73 @@ void RS_GetSysID(TF_Msg* message)
     AttachData(message);
 }
 
+void RS_GetVersion(TF_Msg* message)
+{
+    FwInfoTypeDef fwInfo;
+    uint8_t result;
+    uint32_t version;
+    
+    HAL_CRC_DeInit(&hcrc);
+    hcrc.InputDataFormat = CRC_INPUTDATA_FORMAT_WORDS;
+    HAL_CRC_Init(&hcrc);
+
+    mem_zero(responseData, sizeof(responseData));
+    responseData[0] = GET_VERSION;
+    responseDataLength = 21;
+    
+    // 1. Bootloader version
+    fwInfo.ld_addr = RT_BLDR_ADDR;
+    result = GetFwInfo(&fwInfo);
+    if (result == 0) version = fwInfo.version; else version = 0;
+    responseData[1] = (version >> 24) & 0xFF;
+    responseData[2] = (version >> 16) & 0xFF;
+    responseData[3] = (version >> 8) & 0xFF;
+    responseData[4] = version & 0xFF;
+    
+    // 2. Application version
+    fwInfo.ld_addr = RT_APPL_ADDR;
+    result = GetFwInfo(&fwInfo);
+    if (result == 0) version = fwInfo.version; else version = 0;
+    responseData[5] = (version >> 24) & 0xFF;
+    responseData[6] = (version >> 16) & 0xFF;
+    responseData[7] = (version >> 8) & 0xFF;
+    responseData[8] = version & 0xFF;
+    
+    // 3. Bootloader Backup version
+    fwInfo.ld_addr = RT_BLDR_BKP_ADDR;
+    result = GetFwInfo(&fwInfo);
+    if (result == 0) version = fwInfo.version; else version = 0;
+    responseData[9] = (version >> 24) & 0xFF;
+    responseData[10] = (version >> 16) & 0xFF;
+    responseData[11] = (version >> 8) & 0xFF;
+    responseData[12] = version & 0xFF;
+    
+    // 4. Application Backup version
+    fwInfo.ld_addr = RT_APPL_BKP_ADDR;
+    result = GetFwInfo(&fwInfo);
+    if (result == 0) version = fwInfo.version; else version = 0;
+    responseData[13] = (version >> 24) & 0xFF;
+    responseData[14] = (version >> 16) & 0xFF;
+    responseData[15] = (version >> 8) & 0xFF;
+    responseData[16] = version & 0xFF;
+    
+    // 5. New File version
+    fwInfo.ld_addr = RT_NEW_FILE_ADDR;
+    result = GetFwInfo(&fwInfo);
+    if (result == 0) version = fwInfo.version; else version = 0;
+    responseData[17] = (version >> 24) & 0xFF;
+    responseData[18] = (version >> 16) & 0xFF;
+    responseData[19] = (version >> 8) & 0xFF;
+    responseData[20] = version & 0xFF;
+    
+    HAL_CRC_DeInit(&hcrc);
+    hcrc.InputDataFormat = CRC_INPUTDATA_FORMAT_BYTES;
+    HAL_CRC_Init(&hcrc);
+
+    message->data = responseData;
+    message->len = (TF_LEN) responseDataLength;
+}
+
 /**
   * @brief TinyFrame ID Listener.
   *
@@ -449,30 +515,13 @@ void RS485_SendReliable(uint8_t type, uint8_t *data, TF_LEN len) {
 }
 
 /**
-  * @brief Firmware Request Listener.
-  *
-  * Handles firmware update data chunks writing to QSPI flash.
-  *
-  * @param tf Pointer to TinyFrame instance.
-  * @param msg Pointer to TinyFrame message.
-  * @return TF_Result TF_STAY.
+  * @brief Firmware Request Wrapper Listener.
   */
-TF_Result FWREQ_Listener(TinyFrame *tf, TF_Msg *msg) {
-    if (IsFwUpdateActiv()) {
-        MX_QSPI_Init();
-        if (QSPI_Write ((uint8_t*)msg->data, wradd, msg->len) == QSPI_OK) {
-            wradd += msg->len;
-        } else {
-            wradd = 0;
-            bcnt = 0;
-        }
-        MX_QSPI_Init();
-        QSPI_MemMapMode();
-    }
-    TF_Respond(tf, msg);
-    rstmr = HAL_GetTick();
+TF_Result FwAgent_Listener(TinyFrame *tf, TF_Msg *msg) {
+    FwUpdateAgent_ProcessMessage(tf, msg);
     return TF_STAY;
 }
+
 /**
   * @brief General Listener for TinyFrame messages.
   *
@@ -486,22 +535,7 @@ TF_Result FWREQ_Listener(TinyFrame *tf, TF_Msg *msg) {
 TF_Result GEN_Listener(TinyFrame *tf, TF_Msg *msg) {
 
     if (!IsFwUpdateActiv()) {
-        if ((msg->data[9] == ST_FIRMWARE_REQUEST)&& (msg->data[8] == deviceIDRecieve)) {
-            wradd = ((msg->data[0]<<24)|(msg->data[1]<<16)|(msg->data[2] <<8)|msg->data[3]);
-            bcnt  = ((msg->data[4]<<24)|(msg->data[5]<<16)|(msg->data[6] <<8)|msg->data[7]);
-            MX_QSPI_Init();
-            if (QSPI_Erase(wradd, wradd + bcnt) == QSPI_OK) {
-                StartFwUpdate();
-                TF_AddTypeListener(&tfapp, ST_FIRMWARE_REQUEST, FWREQ_Listener);
-                TF_Respond(tf, msg);
-                rstmr = HAL_GetTick();
-            } else {
-                wradd = 0;
-                bcnt = 0;
-            }
-            MX_QSPI_Init();
-            QSPI_MemMapMode();
-        } else if((msg->data[1] == deviceIDRecieve)
+         if((msg->data[1] == deviceIDRecieve)
               &&  ((msg->data[0] == HOTEL_READ_LOG)
                ||  (msg->data[0] == HOTEL_DELETE_LOG)
                ||  (msg->data[0] == SET_PASSWORD)
@@ -510,7 +544,8 @@ TF_Result GEN_Listener(TinyFrame *tf, TF_Msg *msg) {
                ||  (msg->data[0] == RESTART_CTRL)
                ||  (msg->data[0] == GET_PASSWORD)
                ||  (msg->data[0] == SET_SYSID)
-               ||  (msg->data[0] == GET_SYSID))) {
+               ||  (msg->data[0] == GET_SYSID)
+               ||  (msg->data[0] == GET_VERSION))) {
             cmd = msg->data[0];
             if(cmd == HOTEL_READ_LOG)
             {
@@ -547,6 +582,10 @@ TF_Result GEN_Listener(TinyFrame *tf, TF_Msg *msg) {
             else if(cmd == GET_SYSID)
             {
                 RS_GetSysID(msg);
+            }
+            else if(cmd == GET_VERSION)
+            {
+                RS_GetVersion(msg);
             }
             HAL_Delay(5);
             TF_Respond(tf, msg);
@@ -585,6 +624,8 @@ void RS485_Init(void) {
     if(!init_tf) {
         init_tf = TF_InitStatic(&tfapp, TF_SLAVE); // 1 = master, 0 = slave
         TF_AddGenericListener(&tfapp, GEN_Listener);
+        FwUpdateAgent_Init();
+        TF_AddTypeListener(&tfapp, FIRMWARE_UPDATE, FwAgent_Listener);
     }
     HAL_UART_Receive_IT(&huart1, &rec, 1);
 }
@@ -596,14 +637,12 @@ void RS485_Init(void) {
 *         Performs receive and send operations on a regular basis.
 */
 void RS485_Service(void) {
+    FwUpdateAgent_Service();
+    
     if (IsFwUpdateActiv()) {
-        if(HAL_GetTick() > rstmr + 5000) {
-            TF_RemoveTypeListener(&tfapp, ST_FIRMWARE_REQUEST);
-            StopFwUpdate();
-            wradd = 0;
-            bcnt = 0;
-        }
+        // Firmware update active - skip other tasks or specific logic if needed
     } else if ((HAL_GetTick() - etmr) >= TF_PARSER_TIMEOUT_TICKS) {
+
         if (cmd) {
             cmd = 0;
         }

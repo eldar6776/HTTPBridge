@@ -10,64 +10,28 @@
 #include <Ticker.h>
 #include <SunSet.h>
 #include <ArduinoJson.h>
-#include <IRac.h>
-#include <IRutils.h>
 #include "esp_task_wdt.h"
 #include <OneWire.h>
 #include <DallasTemperature.h>
-#include "ExternalFlash.h"
-#include "FirmwareUpdateService.h"
-
 extern "C"
 {
 #include "TinyFrame.h"
 }
-
-// Helper function for standard CRC32 calculation
-uint32_t crc32_update(uint32_t crc, const uint8_t *data, size_t len) {
-    crc = ~crc;
-    while (len--) {
-        crc ^= *data++;
-        for (int k = 0; k < 8; k++) {
-            crc = crc & 1 ? (crc >> 1) ^ 0xedb88320 : crc >> 1;
-        }
-    }
-    return ~crc;
-}
-
-extern "C"
-{
-#include "TinyFrame.h"
-}
-
-#include "version.h"
 
 // PIN definicije - AŽURIRANO ZA SPI FLASH
 #define BOOT_PIN      0   // Boot dugme / WiFi Reset (ulaz)
 #define LED_PIN       2   // Onboard LED (Status)
 #define RS485_DE_PIN  4   // RS485 Transmit Enable
 
-// SPI Flash pinovi (VSPI bus)
+// SPI Flash pinovi (rezervisano za budući razvoj)
 #define FLASH_CS      5   // SPI Flash Chip Select
 #define FLASH_SCK     18  // SPI Flash Serial Clock
 #define FLASH_MISO    19  // SPI Flash Data Out (fleš->ESP)
 #define FLASH_MOSI    23  // SPI Flash Data In (ESP->fleš)
 
-// VSPI instance for External Flash
-SPIClass vspi(VSPI);
-
-// Objects for Firmware Update
-ExternalFlash extFlash(FLASH_CS, vspi);
-// updateService moved below tfapp DEFINITION
-
-// Wrapper for TinyFrame listener - forward declaration
-TF_Result UpdateService_Listener(TinyFrame *tf, TF_Msg *msg);
-
 // OneWire senzori - PREMJEŠTENI sa GPIO 5 i 18 radi SPI Flash
 #define ONE_WIRE_PIN  13  // OneWire senzor 1 (bio na GPIO 5)
 #define ONE_WIRE2_PIN 14  // OneWire senzor 2 (bio na GPIO 18)
-
-#define IR_PIN        21 // IR Transmitter Pin
 
 // Termostat i Ventilator (ostaje nepromijenjeno)
 #define FAN_L         25  // Ventilator brzina 1 (Low)
@@ -80,10 +44,6 @@ TF_Result UpdateService_Listener(TinyFrame *tf, TF_Msg *msg);
 #define S_CUSTOM 23
 #define S_IR     20   // IR remote data za klima uređaj
 #define S_SOS    40   // SOS signal iz toaleta (emergency button)
-
-
-IRac ac(IR_PIN);
-
 #define WDT_TIMEOUT 5
 #define MAX_PING_FAILURES 10
 #define PING_INTERVAL_MS 60000
@@ -93,8 +53,6 @@ IRac ac(IR_PIN);
 #define TIMEZONE "CET-1CEST,M3.5.0/2,M10.5.0/3"
 #define MAX_PULSE_PINS 16
 #define HOLD_TIME 5000 // 5 sekundi WiFi reset putem dugmeta (BOOT dugme)
-
-
 
 char _ssid[64] = "";
 char _pass[64] = "";
@@ -203,13 +161,6 @@ SunSet sun;
 Ticker rtcSyncTicker;
 Preferences preferences;
 TinyFrame tfapp;
-FirmwareUpdateService updateService(extFlash, tfapp); // Initialized here now
-
-// Implementation of wrapper
-TF_Result UpdateService_Listener(TinyFrame *tf, TF_Msg *msg) {
-  return updateService.handlePacket(tf, msg);
-}
-
 WiFiManager wm; // NOLINT(cert-err58-cpp)
 const char *update_form_html = R"rawliteral(
 <!DOCTYPE html>
@@ -270,11 +221,6 @@ enum CommandType
   CMD_GET_SYSID = 0xEA,            // IC kontroler - Get System ID
   CMD_SET_SYSID = 0xEB,            // IC kontroler - Set System ID
   CMD_GET_PASSWORD = 0xEC,         // IC kontroler
-  CMD_SET_FWD_HEATING = 0xED,      // IC kontroler - Set Forward Heating Flag
-  CMD_SET_FWD_COOLING = 0xEE,      // IC kontroler - Set Forward Cooling Flag
-  CMD_SET_ENABLE_HEATING = 0xEF,   // IC kontroler - Set Enable Heating Flag
-  CMD_SET_ENABLE_COOLING = 0xF0,   // IC kontroler - Set Enable Cooling Flag
-  CMD_GET_VERSION = 0xF1,          // IC kontroler / ESP32 - Get Firmware Versions
   // ESP32 lokalne komande - Premješteno na siguran opseg (0x50-0x68)
   
   CMD_GET_SSID_PSWRD = 0x50,
@@ -302,10 +248,7 @@ enum CommandType
   CMD_TH_OFF = 0x66,
   CMD_TH_ON = 0x67,
   CMD_TH_EMA = 0x68,
-  CMD_SOS_RESET = 0x69,  // Resetuje SOS status nakon što je hitnost riješena
-  CMD_SET_IR_PROTOCOL = 0x70, // Set IR Protocol ID
-  CMD_GET_IR_PROTOCOL = 0x71, // Get IR Protocol ID
-  CMD_SET_IR = 0x72           // Send basic IR command (ON/OFF, Mode, Temp)
+  CMD_SOS_RESET = 0x69  // Resetuje SOS status nakon što je hitnost riješena
 
 };
 /**
@@ -427,22 +370,6 @@ CommandType stringToCommand(const String &cmd)
     return CMD_GET_ROOM_STATUS;
   if (cmd == "SOS_RESET")
     return CMD_SOS_RESET;
-  if (cmd == "SET_FWD_HEATING")
-    return CMD_SET_FWD_HEATING;
-  if (cmd == "SET_FWD_COOLING")
-    return CMD_SET_FWD_COOLING;
-  if (cmd == "SET_ENABLE_HEATING")
-    return CMD_SET_ENABLE_HEATING;
-  if (cmd == "SET_ENABLE_COOLING")
-    return CMD_SET_ENABLE_COOLING;
-  if (cmd == "GET_VERSION")
-    return CMD_GET_VERSION;
-  if (cmd == "SET_IR_PROTOCOL")
-    return CMD_SET_IR_PROTOCOL;
-  if (cmd == "GET_IR_PROTOCOL")
-    return CMD_GET_IR_PROTOCOL;
-  if (cmd == "SET_IR")
-    return CMD_SET_IR;
   return CMD_UNKNOWN;
 }
 /**
@@ -886,6 +813,7 @@ TF_Result ID_Listener(TinyFrame *tf, TF_Msg *msg)
   rdy = -1;
   return TF_CLOSE;
 }
+
 /**
  * TINYFRAME LISTENER ZA SOS SIGNAL
  */
@@ -907,46 +835,13 @@ TF_Result SOS_Listener(TinyFrame *tf, TF_Msg *msg)
   TF_Respond(tf, msg);
   return TF_STAY;
 }
+
 /**
  * TINYFRAME LISTENER ZA IR REMOTE DATA
  */
 TF_Result IR_Listener(TinyFrame *tf, TF_Msg *msg)
 {
   if (msg->len >= 8) {
-    // 1. Handle Physical IR Transmission
-    preferences.begin("ir_settings", true);
-    int protoID = preferences.getInt("protocol", 0);
-    preferences.end();
-
-    if (protoID > 0) {
-      // Configure Protocol
-      ac.next.protocol = (decode_type_t)protoID;
-      
-      // Control Logic (Power & Mode)
-      // msg->data[0] mapping: 0=OFF, 1=COOL, 2=HEAT
-      uint8_t ctrl = msg->data[0];
-      
-      if (ctrl == 0) {
-        ac.next.power = false;
-      } else {
-        ac.next.power = true;
-        ac.next.mode = (ctrl == 1) ? stdAc::opmode_t::kCool : stdAc::opmode_t::kHeat;
-      }
-
-      // Setpoint (msg->data[5])
-      ac.next.degrees = msg->data[5];
-      ac.next.celsius = true; // Always Celsius
-      
-      // Fan Speed -> Force Auto for simplicity, or map if needed
-      ac.next.fanspeed = stdAc::fanspeed_t::kAuto;
-
-      // Send the signal
-      Serial.printf("📡 Sending IR: Proto=%d, Power=%d, Mode=%d, Temp=%d\n", 
-                    protoID, ac.next.power, (int)ac.next.mode, ac.next.degrees);
-      ac.sendAc(); 
-    }
-
-    // 2. Original Logging Logic (Preserved)
     irData.th_ctrl = msg->data[0];
     irData.th_state = msg->data[1];
     irData.mv_temp = (msg->data[2] << 8) | msg->data[3];
@@ -957,7 +852,7 @@ TF_Result IR_Listener(TinyFrame *tf, TF_Msg *msg)
     irData.received = true;
     irData.timestamp = millis();
     
-    Serial.printf("📡 IR Data Received: ctrl=%d, state=%d, temp=%d.%02d°C, sp=%d°C, fan=%d/%d\n",
+    Serial.printf("📡 IR Data: ctrl=%d, state=%d, temp=%d.%02d°C, sp=%d°C, fan=%d/%d\n",
                   irData.th_ctrl, irData.th_state, 
                   irData.mv_temp / 100, irData.mv_temp % 100,
                   irData.sp_temp, irData.fan_ctrl, irData.fan_speed);
@@ -980,6 +875,7 @@ bool parseHHMM(const String &str, int &hh, int &mm)
   mm = str.substring(2, 4).toInt();
   return hh >= 0 && hh < 24 && mm >= 0 && mm < 60;
 }
+
 /**
  * JSON RESPONSE HELPER - Success
  */
@@ -997,6 +893,7 @@ void sendJsonSuccess(AsyncWebServerRequest *request, const String &message, Json
   serializeJson(doc, response);
   request->send(200, "application/json", response);
 }
+
 /**
  * JSON RESPONSE HELPER - Error
  */
@@ -1011,6 +908,7 @@ void sendJsonError(AsyncWebServerRequest *request, int code, const String &messa
   serializeJson(doc, response);
   request->send(code, "application/json", response);
 }
+
 /**
  * RUČNA KONTROLA VANJSKE RASVJETE
  */
@@ -2074,37 +1972,6 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
     sendJsonSuccess(request, "Ping watchdog disabled", &data);
     break;
   }
-  case CMD_GET_VERSION:
-  {
-    // Ako nema ID parametar -> ESP32 firmware info
-    if (!request->hasParam("ID"))
-    {
-      char versionStr[32];
-      sprintf(versionStr, "%d.%d.%d", VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH);
-      
-      JsonDocument data;
-      data["device_type"] = "ESP32";
-      data["firmware_version"] = String(versionStr);
-      data["build_number"] = VERSION_PATCH;
-      data["build_date"] = BUILD_DATE;
-      sendJsonSuccess(request, "ESP32 firmware version retrieved", &data);
-      return;
-    }
-    
-    // Ako ima ID parametar -> šalji GET_VERSION na STM32
-    int id = request->getParam("ID")->value().toInt();
-    
-    if (id < 1 || id > 254)
-    {
-      sendJsonError(request, 400, "Invalid ID (must be 1-254)");
-      return;
-    }
-    
-    buf[0] = CMD_GET_VERSION;
-    buf[1] = id;
-    length = 2;
-    break;
-  }
   case CMD_GET_STATUS:
   {
     time_t now;
@@ -2220,12 +2087,19 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
     }
     
     // IR Remote Data
-    preferences.begin("ir_settings", true);
-    int proto = preferences.getInt("protocol", 0);
-    preferences.end();
-
-    doc["ir"]["protocol_id"] = proto;
-    doc["ir"]["protocol_name"] = typeToString((decode_type_t)proto);
+    if (irData.received) {
+      unsigned long irAge = (millis() - irData.timestamp) / 1000;
+      doc["ir"]["received"] = true;
+      doc["ir"]["age_seconds"] = irAge;
+      doc["ir"]["ctrl_mode"] = irData.th_ctrl == 2 ? "HEATING" : irData.th_ctrl == 1 ? "COOLING" : "OFF";
+      doc["ir"]["state"] = irData.th_state ? "ON" : "OFF";
+      doc["ir"]["measured_temp"] = irData.mv_temp / 100.0;
+      doc["ir"]["setpoint"] = irData.sp_temp;
+      doc["ir"]["fan_ctrl"] = irData.fan_ctrl;
+      doc["ir"]["fan_speed"] = irData.fan_speed;
+    } else {
+      doc["ir"]["received"] = false;
+    }
 
     JsonDocument finalDoc;
     finalDoc["status"] = "success";
@@ -2512,124 +2386,6 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
     sendJsonSuccess(request, "SOS event cleared from memory");
     return;
   }
-  case CMD_SET_IR_PROTOCOL:
-  {
-    if (request->hasParam("VALUE")) {
-        int proto = request->getParam("VALUE")->value().toInt();
-        preferences.begin("ir_settings", false);
-        preferences.putInt("protocol", proto);
-        preferences.end();
-        
-        JsonDocument data;
-        data["protocol_id"] = proto;
-        data["protocol_name"] = typeToString((decode_type_t)proto);
-        
-        sendJsonSuccess(request, "IR Protocol set", &data);
-    } else {
-        sendJsonError(request, 400, "Missing VALUE parameter");
-    }
-    return;
-  }
-  case CMD_GET_IR_PROTOCOL:
-  {
-      preferences.begin("ir_settings", true);
-      int proto = preferences.getInt("protocol", 0); // Default 0 (Disabled)
-      preferences.end();
-      
-      JsonDocument data;
-      data["protocol_id"] = proto;
-      data["protocol_name"] = typeToString((decode_type_t)proto); 
-      
-      sendJsonSuccess(request, "IR Protocol retrieved", &data);
-      return;
-  }
-  case CMD_SET_IR:
-  {
-      if (!request->hasParam("MOD")) {
-          sendJsonError(request, 400, "Missing MOD parameter (OFF, HEATING, COOLING)");
-          return;
-      }
-      
-      String modeStr = request->getParam("MOD")->value();
-      int temp = 25; // Default temp
-      if (request->hasParam("VALUE")) {
-          temp = request->getParam("VALUE")->value().toInt();
-      }
-
-      // 1. Učitaj konfigurisani protokol
-      preferences.begin("ir_settings", true);
-      int protoID = preferences.getInt("protocol", 0);
-      preferences.end();
-
-      if (protoID == 0) {
-          sendJsonError(request, 400, "IR Protocol not configured. Use SET_IR_PROTOCOL first.");
-          return;
-      }
-
-      // 2. Podesi parametre na IRac objektu
-      ac.next.protocol = (decode_type_t)protoID;
-      ac.next.fanspeed = stdAc::fanspeed_t::kAuto; // Uvijek AUTO kako si tražio
-      ac.next.celsius = true;
-
-      if (modeStr == "OFF") {
-          ac.next.power = false;
-      } else if (modeStr == "HEATING") {
-          ac.next.power = true;
-          ac.next.mode = stdAc::opmode_t::kHeat;
-          ac.next.degrees = temp;
-      } else if (modeStr == "COOLING") {
-          ac.next.power = true;
-          ac.next.mode = stdAc::opmode_t::kCool;
-          ac.next.degrees = temp;
-      } else {
-          sendJsonError(request, 400, "Invalid MOD. Use OFF, HEATING or COOLING");
-          return;
-      }
-
-      // 3. Pošalji signal
-      ac.sendAc();
-
-      JsonDocument data;
-      data["protocol"] = typeToString(ac.next.protocol);
-      data["power"] = ac.next.power ? "ON" : "OFF";
-      data["mode"] = modeStr;
-      data["temp"] = ac.next.degrees;
-      
-      sendJsonSuccess(request, "IR Command Sent", &data);
-      return;
-  }
-  case CMD_SET_FWD_HEATING:
-  case CMD_SET_FWD_COOLING:
-  case CMD_SET_ENABLE_HEATING:
-  case CMD_SET_ENABLE_COOLING:
-  {
-    if (!request->hasParam("ID") || !request->hasParam("VALUE"))
-    {
-      sendJsonError(request, 400, "Missing ID or VALUE parameter");
-      return;
-    }
-
-    int id = request->getParam("ID")->value().toInt();
-    int value = request->getParam("VALUE")->value().toInt();
-
-    if (id < 1 || id > 254)
-    {
-      sendJsonError(request, 400, "Invalid ID (must be 1-254)");
-      return;
-    }
-
-    if (value != 0 && value != 1)
-    {
-      sendJsonError(request, 400, "Invalid VALUE (must be 0 or 1)");
-      return;
-    }
-
-    buf[0] = cmd;
-    buf[1] = id;
-    buf[2] = value;
-    length = 3;
-    break;
-  }
   default:
     sendJsonError(request, 400, "Unknown command");
     return;
@@ -2861,34 +2617,6 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
         responseDoc["result"] = "Thermostat set OK";
         break;
 
-      case CMD_SET_FWD_HEATING:
-        if (replyDataLength >= 2) {
-          responseDoc["result"] = "Forward heating flag set";
-          responseDoc["value"] = (bool)replyData[1];
-        }
-        break;
-
-      case CMD_SET_FWD_COOLING:
-        if (replyDataLength >= 2) {
-          responseDoc["result"] = "Forward cooling flag set";
-          responseDoc["value"] = (bool)replyData[1];
-        }
-        break;
-
-      case CMD_SET_ENABLE_HEATING:
-        if (replyDataLength >= 2) {
-          responseDoc["result"] = "Enable heating flag set";
-          responseDoc["value"] = (bool)replyData[1];
-        }
-        break;
-
-      case CMD_SET_ENABLE_COOLING:
-        if (replyDataLength >= 2) {
-          responseDoc["result"] = "Enable cooling flag set";
-          responseDoc["value"] = (bool)replyData[1];
-        }
-        break;
-
       case CMD_READ_LOG:
       {
         // Response format: [CMD][LOG_DSIZE][16-byte log data][device_addr_H][device_addr_L]
@@ -3051,73 +2779,6 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
           responseDoc["error"] = "Invalid response length";
         }
         break;
-
-      case CMD_GET_VERSION:
-      {
-        // Response format: [CMD][bootloader_ver][app_ver][bldr_backup_ver][app_backup_ver][new_file_ver]
-        // Each version is 4 bytes (big-endian uint32_t)
-        // Total: 1 + 5*4 = 21 bytes
-        if (replyDataLength < 21)
-        {
-          responseDoc["error"] = "Invalid response length (expected 21, got " + String(replyDataLength) + ")";
-          break;
-        }
-
-        // Helper lambda to parse 4-byte version
-        auto parseVersion = [](uint8_t* data, int offset) -> uint32_t {
-          return ((uint32_t)data[offset] << 24) | 
-                 ((uint32_t)data[offset + 1] << 16) | 
-                 ((uint32_t)data[offset + 2] << 8) | 
-                 data[offset + 3];
-        };
-
-        // Parse 5 firmware versions
-        uint32_t bootloaderVer = parseVersion(replyData, 1);
-        uint32_t applicationVer = parseVersion(replyData, 5);
-        uint32_t bootloaderBackupVer = parseVersion(replyData, 9);
-        uint32_t applicationBackupVer = parseVersion(replyData, 13);
-        uint32_t newFileVer = parseVersion(replyData, 17);
-
-        // Format versions as hex strings
-        char hexBuf[16];
-        
-        if (bootloaderVer != 0) {
-          sprintf(hexBuf, "0x%08X", bootloaderVer);
-          responseDoc["bootloader_version"] = String(hexBuf);
-        } else {
-          responseDoc["bootloader_version"] = nullptr;
-        }
-
-        if (applicationVer != 0) {
-          sprintf(hexBuf, "0x%08X", applicationVer);
-          responseDoc["application_version"] = String(hexBuf);
-        } else {
-          responseDoc["application_version"] = nullptr;
-        }
-
-        if (bootloaderBackupVer != 0) {
-          sprintf(hexBuf, "0x%08X", bootloaderBackupVer);
-          responseDoc["bootloader_backup_version"] = String(hexBuf);
-        } else {
-          responseDoc["bootloader_backup_version"] = nullptr;
-        }
-
-        if (applicationBackupVer != 0) {
-          sprintf(hexBuf, "0x%08X", applicationBackupVer);
-          responseDoc["application_backup_version"] = String(hexBuf);
-        } else {
-          responseDoc["application_backup_version"] = nullptr;
-        }
-
-        if (newFileVer != 0) {
-          sprintf(hexBuf, "0x%08X", newFileVer);
-          responseDoc["new_file_version"] = String(hexBuf);
-        } else {
-          responseDoc["new_file_version"] = nullptr;
-        }
-
-        break;
-      }
 
       default:
       {
@@ -3318,19 +2979,6 @@ void setup()
   Serial.begin(115200);
   Serial2.begin(115200);
 
-  // Init VSPI for External Flash
-  Serial.println("\n\n=== Initializing SPI Flash ===");
-  Serial.printf("CS Pin: %d, SCK: %d, MISO: %d, MOSI: %d\n", FLASH_CS, FLASH_SCK, FLASH_MISO, FLASH_MOSI);
-  
-  vspi.begin(FLASH_SCK, FLASH_MISO, FLASH_MOSI, -1); // -1 = manual CS control
-  delay(100); // Give SPI time to stabilize
-  
-  if (extFlash.begin()) {
-    Serial.println("External Flash Initialized");
-  } else {
-    Serial.println("External Flash Init FAILED");
-  }
-
   pinMode(BOOT_PIN, INPUT_PULLUP);
   pinMode(RS485_DE_PIN, OUTPUT);
   digitalWrite(RS485_DE_PIN, LOW);
@@ -3346,11 +2994,6 @@ void setup()
   digitalWrite(FAN_H, LOW);
   pinMode(VALVE, OUTPUT);
   digitalWrite(VALVE, LOW);
-
-  // IR Transmitter Init
-  pinMode(IR_PIN, OUTPUT);
-  digitalWrite(IR_PIN, LOW);
-  ac.next.protocol = decode_type_t::GREE; // Default fallback, overridden by prefs
 
   preferences.begin("_port", false);
   _port = preferences.getInt("port", 80);
@@ -3402,9 +3045,7 @@ void setup()
   // Registruj listenere za SOS i IR događaje
   TF_AddTypeListener(&tfapp, S_SOS, SOS_Listener);
   TF_AddTypeListener(&tfapp, S_IR, IR_Listener);
-  // Registruj Firmware Update Listener
-  TF_AddTypeListener(&tfapp, TF_TYPE_FIRMWARE_UPDATE, UpdateService_Listener);
-  Serial.println("✅ TinyFrame listeneri registrovani: S_SOS, S_IR, FW_UPDATE");
+  Serial.println("✅ TinyFrame listeneri registrovani: S_SOS, S_IR");
   
   // Učitaj SOS status iz Preferences (perzistentnost)
   preferences.begin("sos_event", true);
@@ -3488,322 +3129,6 @@ void setup()
           }
         }
       });
-  // --- FIRMWARE UPDATE ENDPOINTS ---
-
-  // 1. Upload Firmware File to External Flash Slot
-  server->on("/upload", HTTP_POST, [](AsyncWebServerRequest *request) {
-    // Ovaj handler se izvršava NA KRAJU, nakon što je upload završen
-    Serial.println("Upload: Request Finished.");
-    
-    // Provjeri parametre primljene u zahtjevu
-    int params = request->params();
-    for(int i=0;i<params;i++){
-      AsyncWebParameter* p = request->getParam(i);
-      Serial.printf("Upload: Param[%s] = %s\n", p->name().c_str(), p->value().c_str());
-    }
-
-    if (!request->hasParam("slot", true) && !request->hasParam("slot")) { // Provjeri i POST i GET
-        Serial.println("Upload: ERROR - Missing 'slot' parameter");
-        sendJsonError(request, 400, "Missing 'slot' parameter (0-7)");
-        return;
-    }
-    
-    // Uzmi slot (preferiraj POST body, pa onda URL query)
-    AsyncWebParameter* p = request->hasParam("slot", true) ? request->getParam("slot", true) : request->getParam("slot");
-    int slot = p->value().toInt();
-    
-    if (slot < 0 || slot >= FW_SLOT_COUNT) {
-        Serial.printf("Upload: ERROR - Invalid slot %d\n", slot);
-        sendJsonError(request, 400, "Invalid slot (0-7)");
-        return;
-    }
-    
-    sendJsonSuccess(request, "Upload Complete");
-  }, 
-  [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
-    // Static variables to hold state across multiple chunks of the same upload
-    static int uploadSlot = -1;
-    static uint32_t uploadOffset = 0;
-    static unsigned long startTime = 0;
-    static String uploadFilename = "";
-
-    if (index == 0) {
-        startTime = millis();
-        uploadFilename = filename;
-        Serial.printf("Upload: START filename='%s'\n", filename.c_str());
-        
-        // Moramo ručno tražiti parametar jer request->getParam() možda nije spreman u ovom trenutku upload handlera
-        // ESPAsyncWebServer parsira parametre dok stižu. 
-        // HACK: Ako koristimo curl -F "slot=0" -F "file=@...", parametar 'slot' možda stigne PRIJE ili POSLIJE fajla.
-        // Sigurnije je proslijediti slot u URL-u: /upload?slot=0
-        
-        if (request->hasParam("slot")) {
-             uploadSlot = request->getParam("slot")->value().toInt();
-             Serial.printf("Upload: Slot detected in URL: %d\n", uploadSlot);
-        } else {
-             // Ako nije u URL, nadamo se da je stigao prije fajla u body-u (multipart)
-             // Ovo je nepouzdano kod multiparta, ali pokušajmo
-             // Za sada, ispišimo upozorenje korisniku da koristi URL parametar
-             Serial.println("Upload: WARNING - 'slot' not found in URL query. Checking body...");
-             // Defaultamo na -1 i čekamo kraj
-             uploadSlot = -1; 
-        }
-
-        // Dodatna provjera za multipart parametre koji su već stigli
-        int params = request->params();
-        for(int i=0;i<params;i++){
-             AsyncWebParameter* p = request->getParam(i);
-             if(p->name() == "slot") {
-                 uploadSlot = p->value().toInt();
-                 Serial.printf("Upload: Slot found in multipart body: %d\n", uploadSlot);
-             }
-        }
-
-        if (uploadSlot >= 0 && uploadSlot < FW_SLOT_COUNT) {
-            if (uploadSlot < 4) { // Standard firmware slots
-                Serial.printf("Upload: Erasing Slot %d... (This may take time)\n", uploadSlot);
-                extFlash.eraseSlot(uploadSlot);
-                
-                // VERIFY ERASE
-                uint8_t checkBuf[16];
-                extFlash.readBufferFromSlot(uploadSlot, 0, checkBuf, 16);
-                bool erased = true;
-                for(int k=0; k<16; k++) if(checkBuf[k] != 0xFF) erased = false;
-                
-                if(erased) {
-                    Serial.println("Upload: Erase VERIFIED (First 16 bytes are 0xFF). Writing...");
-                } else {
-                    Serial.printf("Upload: Erase FAILED! First byte: 0x%02X\n", checkBuf[0]);
-                }
-                uploadOffset = 0;
-            } else {
-                // Raw binary slots (4-7)
-                Serial.printf("Upload: Erasing Slot %d for raw binary... (This may take time)\n", uploadSlot);
-                extFlash.eraseSlot(uploadSlot); // Erase the whole slot first
-                uploadOffset = 0; // Reset offset, we will calculate it based on index for raw slots
-            }
-        } else {
-            Serial.println("Upload: ERROR - Invalid or Missing Slot at start of upload. Use /upload?slot=X");
-        }
-        
-        uploadOffset = 0;
-    }
-
-    // Piši samo ako imamo validan slot
-    if (uploadSlot >= 0 && uploadSlot < FW_SLOT_COUNT) {
-        uint32_t currentWriteOffset = index;
-        if (uploadSlot >= 4) {
-            // For raw slots, the file data starts after the header space
-            currentWriteOffset = RAW_SLOT_DATA_OFFSET + index;
-        }
-        if (!extFlash.writeBufferToSlot(uploadSlot, currentWriteOffset, data, len)) {
-             Serial.printf("Upload: WRITE ERROR at offset %u\n", uploadOffset);
-        }
-        uploadOffset += len;
-        
-        // Log svakih 50KB da vidimo da je živo
-        if ((uploadOffset % 51200) < len) {
-             Serial.printf("Upload: %u bytes written...\n", uploadOffset);
-        }
-    }
-
-    if (final) {
-        unsigned long duration = millis() - startTime;
-        uint32_t finalSize = index + len;
-        Serial.printf("Upload: END. Total %u bytes in %lu ms. Slot used: %d\n", finalSize, duration, uploadSlot);
-
-        if (uploadSlot == -1) {
-            Serial.println("Upload: FAILED - Slot was never identified.");
-            return;
-        }
-
-        // Post-upload validation and metadata writing
-        if (uploadSlot < 4) { // Standard firmware slots
-            FwInfoTypeDef info;
-            extFlash.getSlotInfo(uploadSlot, &info);
-            if (info.size != finalSize) {
-                Serial.printf("Upload VALIDATION FAILED: File size mismatch! Header: %u, Actual: %u\n", info.size, finalSize);
-                // Optionally, invalidate the slot here
-            } else {
-                Serial.println("Upload VALIDATION PASSED: File size matches header.");
-            }
-        } else { // Raw binary slots
-            Serial.println("Upload: Writing metadata for raw slot...");
-            RawSlotInfoTypeDef rawInfo;
-            memset(&rawInfo, 0, sizeof(RawSlotInfoTypeDef));
-
-            rawInfo.magic = RAW_SLOT_MAGIC;
-            rawInfo.size = finalSize;
-            strlcpy(rawInfo.filename, uploadFilename.c_str(), sizeof(rawInfo.filename));
-
-            // Calculate CRC32 of the written file
-            uint32_t crc = 0;
-            uint8_t crc_buf[256];
-            for (uint32_t offset = 0; offset < finalSize; offset += sizeof(crc_buf)) {
-                size_t to_read = (finalSize - offset < sizeof(crc_buf)) ? (finalSize - offset) : sizeof(crc_buf);
-                extFlash.readBufferFromSlot(uploadSlot, RAW_SLOT_DATA_OFFSET + offset, crc_buf, to_read);
-                crc = crc32_update(crc, crc_buf, to_read);
-            }
-            rawInfo.crc32 = crc;
-            rawInfo.valid = 1;
-
-            extFlash.writeBufferToSlot(uploadSlot, RAW_SLOT_HEADER_OFFSET, (uint8_t*)&rawInfo, sizeof(RawSlotInfoTypeDef));
-            Serial.printf("Upload: Raw metadata written. CRC: 0x%08X\n", rawInfo.crc32);
-        }
-    }
-  });
-
-  // 2. List Slots Status
-  server->on("/slots", HTTP_GET, [](AsyncWebServerRequest *request) {
-    JsonDocument doc;
-    JsonArray slots = doc["slots"].to<JsonArray>();
-    
-    for (int i = 0; i < FW_SLOT_COUNT; i++) {
-        JsonObject slotObj = slots.add<JsonObject>();
-        slotObj["id"] = i;
-
-        if (i < 4) { // Standard Firmware Slots
-            slotObj["type"] = "firmware";
-            FwInfoTypeDef info;
-            if (extFlash.getSlotInfo(i, &info)) {
-                slotObj["size"] = info.size;
-                slotObj["version"] = info.version;
-                slotObj["crc32"] = info.crc32;
-                
-                // Stricter validation
-                bool isValid = true;
-                if (info.size == 0 || info.size == 0xFFFFFFFF || info.size > FW_SLOT_SIZE) isValid = false;
-                if (info.version == 0 || info.version == 0xFFFFFFFF) isValid = false;
-                
-                // Validate firmware type from version's MSB
-                uint8_t fw_type = (info.version >> 24) & 0xFF;
-                if (isValid && !((fw_type >= 0x10 && fw_type <= 0x19) || // HC
-                                 (fw_type >= 0x20 && fw_type <= 0x29) || // RC
-                                 (fw_type >= 0x30 && fw_type <= 0x39) || // RT
-                                 (fw_type >= 0x40 && fw_type <= 0x49))) { // CS
-                    isValid = false;
-                }
-                slotObj["valid"] = isValid;
-            } else {
-                slotObj["error"] = "Read Failed";
-                slotObj["valid"] = false;
-            }
-        } else { // Raw Binary Slots
-            slotObj["type"] = "raw_binary";
-            RawSlotInfoTypeDef rawInfo;
-            if (extFlash.readBufferFromSlot(i, RAW_SLOT_HEADER_OFFSET, (uint8_t*)&rawInfo, sizeof(RawSlotInfoTypeDef))) {
-                if (rawInfo.magic == RAW_SLOT_MAGIC && rawInfo.valid == 1) {
-                    slotObj["filename"] = rawInfo.filename;
-                    slotObj["size"] = rawInfo.size;
-                    slotObj["crc32"] = rawInfo.crc32;
-                    slotObj["valid"] = true;
-                } else {
-                    slotObj["valid"] = false;
-                }
-            } else {
-                slotObj["error"] = "Read Failed";
-                slotObj["valid"] = false;
-            }
-        }
-    }
-    String response;
-    serializeJson(doc, response);
-    request->send(200, "application/json", response);
-  });
-
-  // 3. Start Update Process
-  server->on("/start_update", HTTP_POST, [](AsyncWebServerRequest *request) {
-    // Robust check: Look in default locations (Query/Body) AND explicitly in POST Body
-    bool hasSlot = request->hasParam("slot") || request->hasParam("slot", true);
-    bool hasAddr = request->hasParam("addr") || request->hasParam("addr", true);
-
-    if (!hasSlot || !hasAddr) {
-        sendJsonError(request, 400, "Missing slot or addr");
-        return;
-    }
-    
-    // Retrieve values (Prioritize POST body if available)
-    AsyncWebParameter* pSlot = request->hasParam("slot", true) ? request->getParam("slot", true) : request->getParam("slot");
-    AsyncWebParameter* pAddr = request->hasParam("addr", true) ? request->getParam("addr", true) : request->getParam("addr");
-    
-    int slot = pSlot->value().toInt();
-    int addr = pAddr->value().toInt();
-
-    // --- LOGIKA ADRESIRANJA PO SLOTOVIMA ---
-    const uint32_t ADDR_FW_STAGING = 0x90F00000; // RT_NEW_FILE_ADDR (Firmware)
-    const uint32_t ADDR_EXT_FLASH  = 0x90000000; // EXT_FLASH_ADDR (Resursi)
-
-    uint32_t staging = ADDR_EXT_FLASH; // Default inicijalizacija
-
-    // Provjera da li je korisnik poslao custom adresu
-    bool hasStagingParam = request->hasParam("staging_addr") || request->hasParam("staging_addr", true);
-    uint32_t customStaging = 0;
-    if (hasStagingParam) {
-        AsyncWebParameter* pStaging = request->hasParam("staging_addr", true) ? request->getParam("staging_addr", true) : request->getParam("staging_addr");
-        customStaging = strtoul(pStaging->value().c_str(), NULL, 0);
-    }
-
-    if (slot >= 0 && slot <= 2) {
-        staging = ADDR_FW_STAGING; // UVIJEK Firmware adresa, bez override-a
-    } else if (slot == 3) {
-        staging = hasStagingParam ? customStaging : ADDR_FW_STAGING; // Default FW, dozvoljen override
-    } else if (slot >= 4 && slot <= 6) {
-        staging = ADDR_EXT_FLASH;  // UVIJEK Ext Flash adresa, bez override-a
-    } else if (slot == 7) {
-        staging = hasStagingParam ? customStaging : ADDR_EXT_FLASH;  // Default Ext, dozvoljen override
-    }
-    
-    if (updateService.startUpdate(slot, addr, staging)) {
-        sendJsonSuccess(request, "Update Started");
-    } else {
-        sendJsonError(request, 500, "Failed to start update (Busy or Invalid Slot)");
-    }
-  });
-
-  // 4. Update Status
-  server->on("/update_status", HTTP_GET, [](AsyncWebServerRequest *request) {
-    JsonDocument doc;
-    doc["active"] = updateService.isActive();
-    doc["state"] = updateService.getState();
-    doc["progress"] = updateService.getProgress();
-    doc["lastError"] = updateService.getLastError();
-    
-    String response;
-    serializeJson(doc, response);
-    request->send(200, "application/json", response);
-  });
-
-  // 4a. Reset Update Service
-  server->on("/reset_update", HTTP_POST, [](AsyncWebServerRequest *request) {
-    updateService.reset();
-    sendJsonSuccess(request, "Update service reset to IDLE");
-  });
-
-  // 5. Hex Dump for Debugging
-  server->on("/hexdump", HTTP_GET, [](AsyncWebServerRequest *request) {
-    if (!request->hasParam("slot") || !request->hasParam("offset")) {
-        request->send(400, "text/plain", "Missing slot or offset");
-        return;
-    }
-    int slot = request->getParam("slot")->value().toInt();
-    int offset = request->getParam("offset")->value().toInt();
-    int length = request->hasParam("len") ? request->getParam("len")->value().toInt() : 64;
-    
-    if (length > 1024) length = 1024; // Limit size
-
-    uint8_t buf[1024];
-    extFlash.readBufferFromSlot(slot, offset, buf, length);
-    
-    String output = "Hex Dump Slot " + String(slot) + " Offset " + String(offset) + ":\n";
-    for(int i=0; i<length; i++) {
-        if (i % 16 == 0) output += String(offset + i, HEX) + ": ";
-        if (buf[i] < 0x10) output += "0";
-        output += String(buf[i], HEX) + " ";
-        if (i % 16 == 15) output += "\n";
-    }
-    request->send(200, "text/plain", output);
-  });
-
   server->begin();
   Serial.println("Update server on http://" + WiFi.localIP().toString() + ":" + _port + "/update");
 }
@@ -3812,8 +3137,6 @@ void setup()
  */
 void loop()
 {
-  updateService.loop();
-
   unsigned long buttonPressStart = 0;
   static uint32_t tick = millis();
   static unsigned long wifiCheckTimer = 0;

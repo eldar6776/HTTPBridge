@@ -21,6 +21,8 @@
 #include "stm32746g_qspi.h"
 #include "stm32746g_sdram.h"
 #include "stm32746g_eeprom.h"
+#include "firmware_update_agent.h"
+#include "FirmwareDefs.h"
 /* Imported Types  -----------------------------------------------------------*/
 /* Imported Variables --------------------------------------------------------*/
 /* Imported Functions    -----------------------------------------------------*/
@@ -30,8 +32,6 @@ static TinyFrame tfapp;
 /* Private Variables  --------------------------------------------------------*/
 bool init_tf = false;
 static uint32_t rstmr = 0;
-static uint32_t wradd = 0;
-static uint32_t bcnt = 0;
 uint16_t sysid;
 uint32_t rsflg, tfbps, dlen, etmr;
 uint8_t lbuf[32], dbuf[32], tbuf[32], lcnt = 0, dcnt = 0, tcnt = 0, cmd = 0;
@@ -44,7 +44,7 @@ volatile bool rs485_msg_acknowledged = false;
 static uint32_t thermo_update_tmr = 0;
 volatile bool lang_save_pending = false;
 /* Private Function Prototypes -----------------------------------------------*/
-uint8_t responseData[6] = {0}, responseDataLength = 0, sendData[10] = {0}, sendDataLength = 0;
+uint8_t responseData[32] = {0}, responseDataLength = 0, sendData[10] = {0}, sendDataLength = 0;
 
 /* Program Code  -------------------------------------------------------------*/
 /**
@@ -98,52 +98,43 @@ void RS485_SendReliable(uint8_t type, uint8_t *data, TF_LEN len)
     }
 }
 
-TF_Result FWREQ_Listener(TinyFrame *tf, TF_Msg *msg)
-{
-    if (IsFwUpdateActiv())
-    {
-        MX_QSPI_Init();
-        if (QSPI_Write((uint8_t *)msg->data, wradd, msg->len) == QSPI_OK)
-        {
-            wradd += msg->len;
-        }
-        else
-        {
-            wradd = 0;
-            bcnt = 0;
-        }
-        MX_QSPI_Init();
-        QSPI_MemMapMode();
-    }
-    TF_Respond(tf, msg);
-    rstmr = HAL_GetTick();
+/**
+  * @brief Firmware Request Wrapper Listener.
+  */
+TF_Result FwAgent_Listener(TinyFrame *tf, TF_Msg *msg) {
+    FwUpdateAgent_ProcessMessage(tf, msg);
     return TF_STAY;
 }
 TF_Result GEN_Listener(TinyFrame *tf, TF_Msg *msg)
 {
     if (!IsFwUpdateActiv())
     {
-        if ((msg->data[9] == ST_FIRMWARE_REQUEST) && (msg->data[8] == tfifa))
-        {
-            wradd = ((msg->data[0] << 24) | (msg->data[1] << 16) | (msg->data[2] << 8) | msg->data[3]);
-            bcnt = ((msg->data[4] << 24) | (msg->data[5] << 16) | (msg->data[6] << 8) | msg->data[7]);
-            MX_QSPI_Init();
-            if (QSPI_Erase(wradd, wradd + bcnt) == QSPI_OK)
-            {
-                StartFwUpdate();
-                TF_AddTypeListener(&tfapp, ST_FIRMWARE_REQUEST, FWREQ_Listener);
-                TF_Respond(tf, msg);
-                rstmr = HAL_GetTick();
-            }
-            else
-            {
-                wradd = 0;
-                bcnt = 0;
-            }
-            MX_QSPI_Init();
-            QSPI_MemMapMode();
-        }
-        else if ((msg->data[1] == tfifa) && ((msg->data[0] == RESTART_CTRL) || (msg->data[0] == LOAD_DEFAULT) || (msg->data[0] == FORMAT_EXTFLASH) || (msg->data[0] == GET_ROOM_TEMP) || (msg->data[0] == SET_ROOM_TEMP) || (msg->data[0] == SET_THST_HEATING) || (msg->data[0] == SET_THST_COOLING) || (msg->data[0] == SET_THST_ON) || (msg->data[0] == SET_THST_OFF) || (msg->data[0] == GET_APPL_STAT) || (msg->data[0] == GET_FAN_DIFFERENCE) || (msg->data[0] == GET_FAN_BAND) || (msg->data[0] == THERMOSTAT_CHANGE_ALL) || (msg->data[0] == SET_GUEST_IN_TEMP) || (msg->data[0] == SET_GUEST_OUT_TEMP) || (msg->data[0] == GET_GUEST_IN_TEMP) || (msg->data[0] == GET_GUEST_OUT_TEMP) || (msg->data[0] == GUEST_ENTER_KEYCARD_RS485) || (msg->data[0] == GUEST_ENTER_PASSWORD_RS485) || (msg->data[0] == GUEST_PASSWORD_SEND) || (msg->data[0] == GET_ROOM_STATUS) || (msg->data[0] == PINS) || (msg->data[0] == SET_LANG) || (msg->data[0] == QR_CODE_SET) || (msg->data[0] == QR_CODE_GET)))
+        if ((msg->data[1] == tfifa) && ((msg->data[0] == RESTART_CTRL) 
+        || (msg->data[0] == LOAD_DEFAULT) 
+        || (msg->data[0] == FORMAT_EXTFLASH) 
+        || (msg->data[0] == GET_ROOM_TEMP) 
+        || (msg->data[0] == SET_ROOM_TEMP) 
+        || (msg->data[0] == SET_THST_HEATING) 
+        || (msg->data[0] == SET_THST_COOLING) 
+        || (msg->data[0] == SET_THST_ON) 
+        || (msg->data[0] == SET_THST_OFF) 
+        || (msg->data[0] == GET_APPL_STAT) 
+        || (msg->data[0] == GET_FAN_DIFFERENCE) 
+        || (msg->data[0] == GET_FAN_BAND) 
+        || (msg->data[0] == THERMOSTAT_CHANGE_ALL) 
+        || (msg->data[0] == SET_GUEST_IN_TEMP) 
+        || (msg->data[0] == SET_GUEST_OUT_TEMP) 
+        || (msg->data[0] == GET_GUEST_IN_TEMP) 
+        || (msg->data[0] == GET_GUEST_OUT_TEMP) 
+        || (msg->data[0] == GUEST_ENTER_KEYCARD_RS485) 
+        || (msg->data[0] == GUEST_ENTER_PASSWORD_RS485) 
+        || (msg->data[0] == GUEST_PASSWORD_SEND) 
+        || (msg->data[0] == GET_ROOM_STATUS) 
+        || (msg->data[0] == GET_VERSION) 
+        || (msg->data[0] == PINS) 
+        || (msg->data[0] == SET_LANG) 
+        || (msg->data[0] == QR_CODE_SET) 
+        || (msg->data[0] == QR_CODE_GET)))
         {
             cmd = msg->data[0];
             if (cmd == SET_ROOM_TEMP)
@@ -153,42 +144,69 @@ TF_Result GEN_Listener(TinyFrame *tf, TF_Msg *msg)
                 ThstActivityUpdateSet();
                 THSTAT_SetpointChanged();
                 SaveThermostatController(&thst, EE_THST1);
+                responseData[responseDataLength++] = SET_ROOM_TEMP;
+                msg->data = responseData;
+                msg->len = (TF_LEN) responseDataLength;
             }
             else if (cmd == SET_THST_HEATING)
             {
                 thst.th_ctrl = 2;
-                THSTAT_SetpointChanged();
+                thst.th_ctrl_old = thst.th_ctrl;  // Sačuvaj trenutni mod
                 ThstModeUpdateSet();
                 ThstStateUpdateSet();
                 ThstRoomTempUpdateSet();
+                ThstSetpointUpdateSet();
+                ThstActivityUpdateSet();
                 SaveThermostatController(&thst, EE_THST1);
+                THSTAT_SetpointChanged();
+                responseData[responseDataLength++] = SET_THST_HEATING;
+                msg->data = responseData;
+                msg->len = (TF_LEN) responseDataLength;
             }
             else if (cmd == SET_THST_COOLING)
             {
                 thst.th_ctrl = 1;
-                THSTAT_SetpointChanged();
+                thst.th_ctrl_old = thst.th_ctrl;  // Sačuvaj trenutni mod
                 ThstModeUpdateSet();
                 ThstStateUpdateSet();
                 ThstRoomTempUpdateSet();
+                ThstSetpointUpdateSet();
+                ThstActivityUpdateSet();
                 SaveThermostatController(&thst, EE_THST1);
+                THSTAT_SetpointChanged();
+                responseData[responseDataLength++] = SET_THST_COOLING;
+                msg->data = responseData;
+                msg->len = (TF_LEN) responseDataLength;
             }
             else if (cmd == SET_THST_ON)
             {
-                thst.th_ctrl = 1;
-                THSTAT_SetpointChanged();
+                EE_ReadBuffer(&thst.th_ctrl_old, EE_THST_CTRL_OLD, 1);  // Učitaj prethodni mod
+                thst.th_ctrl = thst.th_ctrl_old;  // Postavi na prethodni mod
                 ThstModeUpdateSet();
                 ThstStateUpdateSet();
                 ThstRoomTempUpdateSet();
+                ThstSetpointUpdateSet();
+                ThstActivityUpdateSet();
                 SaveThermostatController(&thst, EE_THST1);
+                THSTAT_SetpointChanged();
+                responseData[responseDataLength++] = SET_THST_ON;
+                msg->data = responseData;
+                msg->len = (TF_LEN) responseDataLength;
             }
             else if (cmd == SET_THST_OFF)
             {
+                thst.th_ctrl_old = thst.th_ctrl;  // Sačuvaj trenutni mod
                 thst.th_ctrl = 0;
-                THSTAT_SetpointChanged();
                 ThstModeUpdateSet();
                 ThstStateUpdateSet();
+                ThstSetpointUpdateSet();
                 ThstRoomTempUpdateSet();
+                ThstActivityUpdateSet();
                 SaveThermostatController(&thst, EE_THST1);
+                THSTAT_SetpointChanged();
+                responseData[responseDataLength++] = SET_THST_OFF;
+                msg->data = responseData;
+                msg->len = (TF_LEN) responseDataLength;
             }
             else if (cmd == GET_FAN_DIFFERENCE)
             {
@@ -305,6 +323,72 @@ TF_Result GEN_Listener(TinyFrame *tf, TF_Msg *msg)
             {
                 language = msg->data[2];
                 lang_save_pending = true;
+            }
+            else if (cmd == GET_VERSION)
+            {
+                FwInfoTypeDef fwInfo;
+                uint8_t result;
+                uint32_t version;
+                
+                HAL_CRC_DeInit(&hcrc);
+                hcrc.InputDataFormat = CRC_INPUTDATA_FORMAT_WORDS;
+                HAL_CRC_Init(&hcrc);
+
+                mem_zero(responseData, sizeof(responseData));
+                responseData[0] = GET_VERSION;
+                responseDataLength = 21;
+                
+                // 1. Bootloader version
+                fwInfo.ld_addr = RT_BLDR_ADDR;
+                result = GetFwInfo(&fwInfo);
+                if (result == 0) version = fwInfo.version; else version = 0;
+                responseData[1] = (version >> 24) & 0xFF;
+                responseData[2] = (version >> 16) & 0xFF;
+                responseData[3] = (version >> 8) & 0xFF;
+                responseData[4] = version & 0xFF;
+                
+                // 2. Application version
+                fwInfo.ld_addr = RT_APPL_ADDR;
+                result = GetFwInfo(&fwInfo);
+                if (result == 0) version = fwInfo.version; else version = 0;
+                responseData[5] = (version >> 24) & 0xFF;
+                responseData[6] = (version >> 16) & 0xFF;
+                responseData[7] = (version >> 8) & 0xFF;
+                responseData[8] = version & 0xFF;
+                
+                // 3. Bootloader Backup version
+                fwInfo.ld_addr = RT_BLDR_BKP_ADDR;
+                result = GetFwInfo(&fwInfo);
+                if (result == 0) version = fwInfo.version; else version = 0;
+                responseData[9] = (version >> 24) & 0xFF;
+                responseData[10] = (version >> 16) & 0xFF;
+                responseData[11] = (version >> 8) & 0xFF;
+                responseData[12] = version & 0xFF;
+                
+                // 4. Application Backup version
+                fwInfo.ld_addr = RT_APPL_BKP_ADDR;
+                result = GetFwInfo(&fwInfo);
+                if (result == 0) version = fwInfo.version; else version = 0;
+                responseData[13] = (version >> 24) & 0xFF;
+                responseData[14] = (version >> 16) & 0xFF;
+                responseData[15] = (version >> 8) & 0xFF;
+                responseData[16] = version & 0xFF;
+                
+                // 5. New File version
+                fwInfo.ld_addr = RT_NEW_FILE_ADDR;
+                result = GetFwInfo(&fwInfo);
+                if (result == 0) version = fwInfo.version; else version = 0;
+                responseData[17] = (version >> 24) & 0xFF;
+                responseData[18] = (version >> 16) & 0xFF;
+                responseData[19] = (version >> 8) & 0xFF;
+                responseData[20] = version & 0xFF;
+                
+                HAL_CRC_DeInit(&hcrc);
+                hcrc.InputDataFormat = CRC_INPUTDATA_FORMAT_BYTES;
+                HAL_CRC_Init(&hcrc);
+                
+                msg->data = responseData;
+                msg->len = (TF_LEN) responseDataLength;
             }
             else if (cmd == PINS)
             {
@@ -435,6 +519,8 @@ void RS485_Init(void)
     {
         init_tf = TF_InitStatic(&tfapp, TF_SLAVE); // 1 = master, 0 = slave
         TF_AddGenericListener(&tfapp, GEN_Listener);
+        FwUpdateAgent_Init();
+        TF_AddTypeListener(&tfapp, FIRMWARE_UPDATE, FwAgent_Listener);
     }
     HAL_UART_Receive_IT(&huart1, &rec, 1);
 }
@@ -445,16 +531,12 @@ void RS485_Init(void)
  */
 void RS485_Service(void)
 {
+    FwUpdateAgent_Service();
+    
     uint8_t i;
     if (IsFwUpdateActiv())
     {
-        if (HAL_GetTick() > rstmr + 5000)
-        {
-            TF_RemoveTypeListener(&tfapp, ST_FIRMWARE_REQUEST);
-            StopFwUpdate();
-            wradd = 0;
-            bcnt = 0;
-        }
+        // Firmware update active - skip other tasks or specific logic if needed
     }
     else if ((HAL_GetTick() - etmr) >= TF_PARSER_TIMEOUT_TICKS)
     {

@@ -1,0 +1,19 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Build Firmware",
+			"type": "shell",
+			"command": "C:\\Users\\eldar\\.platformio\\penv\\Scripts\\platformio.exe run",
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "Upload Firmware",
+			"type": "shell",
+			"command": "C:\\Users\\eldar\\.platformio\\penv\\Scripts\\platformio.exe run --target upload",
+			"isBackground": false,
+			"group": "build"
+		}
+	]
+}

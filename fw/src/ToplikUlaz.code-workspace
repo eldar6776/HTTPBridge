@@ -1,0 +1,20 @@
+{
+	"folders": [
+		{
+			"path": "../../../Dzevad/fw/ToplikUlaz"
+		},
+		{
+			"path": "../.."
+		},
+		{
+			"path": "../../../Dzevad/fw/ToplikSceneOdlagac"
+		},
+		{
+			"path": "../../../Dzevad/fw/ToplikTermostatToalet"
+		},
+		{
+			"path": "../../../Dzevad/fw/Common"
+		}
+	],
+	"settings": {}
+}

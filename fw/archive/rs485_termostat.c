@@ -22,6 +22,8 @@
 #include "stm32746g_qspi.h"
 #include "stm32746g_sdram.h"
 #include "stm32746g_eeprom.h"
+#include "firmware_update_agent.h"
+#include "FirmwareDefs.h"
 /* Imported Types  -----------------------------------------------------------*/
 /* Imported Variables --------------------------------------------------------*/
 extern uint8_t language;
@@ -33,8 +35,6 @@ static TinyFrame tfapp;
 /* Private Variables  --------------------------------------------------------*/
 bool init_tf = false;
 static uint32_t rstmr = 0;
-static uint32_t wradd = 0;
-static uint32_t bcnt = 0;
 uint16_t sysid;
 uint32_t rsflg, tfbps, dlen, etmr;
 uint8_t lbuf[32], dbuf[32], tbuf[32], lcnt = 0, dcnt = 0, tcnt = 0, cmd = 0;
@@ -50,7 +50,7 @@ static uint32_t fwd_data_tmr = 0;
 static bool fwd_data_req = false;
 static bool sos_req = false;
 
-uint8_t responseData[6] = {0}, responseDataLength = 0;
+uint8_t responseData[32] = {0}, responseDataLength = 0;
 
 /* Program Code  -------------------------------------------------------------*/
 /**
@@ -65,25 +65,13 @@ TF_Result ID_Listener(TinyFrame *tf, TF_Msg *msg) {
     return TF_CLOSE;
 }
 /**
- * @brief  Firmware Request Listener function for TinyFrame messages.
+ * @brief  Firmware Update Agent Listener wrapper for TinyFrame messages.
  * @param  tf: Pointer to TinyFrame instance.
  * @param  msg: Pointer to TinyFrame message.
  * @retval TF_Result indicating how to handle the message.
  */
-TF_Result FWREQ_Listener(TinyFrame *tf, TF_Msg *msg) {
-    if (IsFwUpdateActiv()) {
-        MX_QSPI_Init();
-        if (QSPI_Write ((uint8_t*)msg->data, wradd, msg->len) == QSPI_OK) {
-            wradd += msg->len;
-        } else {
-            wradd = 0;
-            bcnt = 0;
-        }
-        MX_QSPI_Init();
-        QSPI_MemMapMode();
-    }
-    TF_Respond(tf, msg);
-    rstmr = HAL_GetTick();
+TF_Result FwAgent_Listener(TinyFrame *tf, TF_Msg *msg) {
+    FwUpdateAgent_ProcessMessage(tf, msg);
     return TF_STAY;
 }
 
@@ -144,22 +132,7 @@ void RS485_TriggerSOS(void)
  */ 
 TF_Result GEN_Listener(TinyFrame *tf, TF_Msg *msg) {
     if (!IsFwUpdateActiv()) {
-        if ((msg->data[9] == ST_FIRMWARE_REQUEST)&& (msg->data[8] == tfifa)) {
-            wradd = ((msg->data[0]<<24)|(msg->data[1]<<16)|(msg->data[2] <<8)|msg->data[3]);
-            bcnt  = ((msg->data[4]<<24)|(msg->data[5]<<16)|(msg->data[6] <<8)|msg->data[7]);
-            MX_QSPI_Init();
-            if (QSPI_Erase(wradd, wradd + bcnt) == QSPI_OK) {
-                StartFwUpdate();
-                TF_AddTypeListener(&tfapp, ST_FIRMWARE_REQUEST, FWREQ_Listener);
-                TF_Respond(tf, msg);
-                rstmr = HAL_GetTick();
-            } else {
-                wradd = 0;
-                bcnt = 0;
-            }
-            MX_QSPI_Init();
-            QSPI_MemMapMode();
-        } else if((msg->data[1] == tfifa)
+        if((msg->data[1] == tfifa)
                   &&  ((msg->data[0] == RESTART_CTRL)
                        ||  (msg->data[0] == LOAD_DEFAULT)
                        ||  (msg->data[0] == FORMAT_EXTFLASH)
@@ -175,6 +148,11 @@ TF_Result GEN_Listener(TinyFrame *tf, TF_Msg *msg) {
                        ||  (msg->data[0] == SELECT_RELAY)
                        ||  (msg->data[0] == THERMOSTAT_CHANGE_ALL)
                        ||  (msg->data[0] == SET_LANG)
+                       ||  (msg->data[0] == SET_FWD_HEATING)
+                       ||  (msg->data[0] == SET_FWD_COOLING)
+                       ||  (msg->data[0] == SET_ENABLE_HEATING)
+                       ||  (msg->data[0] == SET_ENABLE_COOLING)
+                       ||  (msg->data[0] == GET_VERSION)
                        ||  (msg->data[0] == PINS))) {
             cmd = msg->data[0];
             if      (cmd == SET_ROOM_TEMP) {
@@ -189,6 +167,7 @@ TF_Result GEN_Listener(TinyFrame *tf, TF_Msg *msg) {
             }
             else if (cmd == SET_THST_HEATING) {
                 thst.th_ctrl = 2;
+                thst.th_ctrl_old = thst.th_ctrl;  // Sačuvaj trenutni mod
                 ThstModeUpdateSet();   // Update mode to HEATING
                 ThstStateUpdateSet();  // Update ON/OFF state
                 ThstRoomTempUpdateSet(); // Update room temp display position
@@ -202,6 +181,7 @@ TF_Result GEN_Listener(TinyFrame *tf, TF_Msg *msg) {
             }
             else if (cmd == SET_THST_COOLING) {
                 thst.th_ctrl = 1;
+                thst.th_ctrl_old = thst.th_ctrl;  // Sačuvaj trenutni mod
                 ThstModeUpdateSet();   // Update mode to COOLING
                 ThstStateUpdateSet();  // Update ON/OFF state
                 ThstRoomTempUpdateSet(); // Update room temp display position
@@ -229,7 +209,6 @@ TF_Result GEN_Listener(TinyFrame *tf, TF_Msg *msg) {
             }
             else if (cmd == SET_THST_OFF) {
                 thst.th_ctrl_old = thst.th_ctrl;  // Sačuvaj trenutni mod
-                EE_WriteBuffer(&thst.th_ctrl_old, EE_THST_CTRL_OLD, 1);  // Spremi samo th_ctrl_old
                 thst.th_ctrl = 0;
                 ThstModeUpdateSet();       // Osvježi mode (sakrij HEATING/COOLING)
                 ThstStateUpdateSet();      // Update ON/OFF state
@@ -256,11 +235,18 @@ TF_Result GEN_Listener(TinyFrame *tf, TF_Msg *msg) {
                 msg->len=(TF_LEN) responseDataLength;
             }
             else if (cmd == GET_ROOM_TEMP) {
-
                 responseData[responseDataLength++] = GET_ROOM_TEMP;
                 responseData[responseDataLength++] = (thst.mv_temp + thst.mv_offset) / 10;
                 responseData[responseDataLength++] = thst.sp_temp;
                 responseData[responseDataLength++] = thst.fan_speed;
+                responseData[responseDataLength++] = thst.th_ctrl;
+                responseData[responseDataLength++] = thst.sp_max;
+                responseData[responseDataLength++] = thst.sp_min;
+                responseData[responseDataLength++] = thst.fan_ctrl;
+                responseData[responseDataLength++] = thst.forward_heating;
+                responseData[responseDataLength++] = thst.forward_cooling;    
+                responseData[responseDataLength++] = thst_enable_heating;
+                responseData[responseDataLength++] = thst_enable_cooling;                  
                 msg->data=responseData;
                 msg->len=(TF_LEN) responseDataLength;
             }
@@ -283,6 +269,108 @@ TF_Result GEN_Listener(TinyFrame *tf, TF_Msg *msg) {
                 language = msg->data[2];
                 languageHasChanged = 1;
                 DISP_LanguageUpdate();
+            }
+            else if (cmd == SET_FWD_HEATING)
+            {
+                thst.forward_heating = msg->data[2];
+                SaveThermostatController(&thst, EE_THST1);
+                responseData[responseDataLength++] = SET_FWD_HEATING;
+                responseData[responseDataLength++] = thst.forward_heating;
+                msg->data = responseData;
+                msg->len = (TF_LEN) responseDataLength;
+            }
+            else if (cmd == SET_FWD_COOLING)
+            {
+                thst.forward_cooling = msg->data[2];
+                SaveThermostatController(&thst, EE_THST1);
+                responseData[responseDataLength++] = SET_FWD_COOLING;
+                responseData[responseDataLength++] = thst.forward_cooling;
+                msg->data = responseData;
+                msg->len = (TF_LEN) responseDataLength;
+            }
+            else if (cmd == SET_ENABLE_HEATING)
+            {
+                thst_enable_heating = msg->data[2];
+                EE_WriteBuffer(&thst_enable_heating, EE_THST1 + 23, 1);
+                responseData[responseDataLength++] = SET_ENABLE_HEATING;
+                responseData[responseDataLength++] = thst_enable_heating;
+                msg->data = responseData;
+                msg->len = (TF_LEN) responseDataLength;
+            }
+            else if (cmd == SET_ENABLE_COOLING)
+            {
+                thst_enable_cooling = msg->data[2];
+                EE_WriteBuffer(&thst_enable_cooling, EE_THST1 + 22, 1);
+                responseData[responseDataLength++] = SET_ENABLE_COOLING;
+                responseData[responseDataLength++] = thst_enable_cooling;
+                msg->data = responseData;
+                msg->len = (TF_LEN) responseDataLength;
+            }
+            else if (cmd == GET_VERSION)
+            {
+                FwInfoTypeDef fwInfo;
+                uint8_t result;
+                uint32_t version;
+                
+                HAL_CRC_DeInit(&hcrc);
+                hcrc.InputDataFormat = CRC_INPUTDATA_FORMAT_WORDS;
+                HAL_CRC_Init(&hcrc);
+                
+                mem_zero(responseData, sizeof(responseData));
+                responseData[0] = GET_VERSION;
+                responseDataLength = 21;
+                
+                // 1. Bootloader version
+                fwInfo.ld_addr = RT_BLDR_ADDR;
+                result = GetFwInfo(&fwInfo);
+                if (result == 0) version = fwInfo.version; else version = 0;
+                responseData[1] = (version >> 24) & 0xFF;
+                responseData[2] = (version >> 16) & 0xFF;
+                responseData[3] = (version >> 8) & 0xFF;
+                responseData[4] = version & 0xFF;
+                
+                // 2. Application version
+                fwInfo.ld_addr = RT_APPL_ADDR;
+                result = GetFwInfo(&fwInfo);
+                if (result == 0) version = fwInfo.version; else version = 0;
+                responseData[5] = (version >> 24) & 0xFF;
+                responseData[6] = (version >> 16) & 0xFF;
+                responseData[7] = (version >> 8) & 0xFF;
+                responseData[8] = version & 0xFF;
+                
+                // 3. Bootloader Backup version
+                fwInfo.ld_addr = RT_BLDR_BKP_ADDR;
+                result = GetFwInfo(&fwInfo);
+                if (result == 0) version = fwInfo.version; else version = 0;
+                responseData[9] = (version >> 24) & 0xFF;
+                responseData[10] = (version >> 16) & 0xFF;
+                responseData[11] = (version >> 8) & 0xFF;
+                responseData[12] = version & 0xFF;
+                
+                // 4. Application Backup version
+                fwInfo.ld_addr = RT_APPL_BKP_ADDR;
+                result = GetFwInfo(&fwInfo);
+                if (result == 0) version = fwInfo.version; else version = 0;
+                responseData[13] = (version >> 24) & 0xFF;
+                responseData[14] = (version >> 16) & 0xFF;
+                responseData[15] = (version >> 8) & 0xFF;
+                responseData[16] = version & 0xFF;
+                
+                // 5. New File version
+                fwInfo.ld_addr = RT_NEW_FILE_ADDR;
+                result = GetFwInfo(&fwInfo);
+                if (result == 0) version = fwInfo.version; else version = 0;
+                responseData[17] = (version >> 24) & 0xFF;
+                responseData[18] = (version >> 16) & 0xFF;
+                responseData[19] = (version >> 8) & 0xFF;
+                responseData[20] = version & 0xFF;
+                
+                HAL_CRC_DeInit(&hcrc);
+                hcrc.InputDataFormat = CRC_INPUTDATA_FORMAT_BYTES;
+                HAL_CRC_Init(&hcrc);
+            
+                msg->data = responseData;
+                msg->len = (TF_LEN) responseDataLength;
             }
             // Trigger Forward Data if enabled and command is relevant
             if (cmd == SET_ROOM_TEMP || cmd == SET_THST_HEATING || cmd == SET_THST_COOLING || 
@@ -371,6 +459,7 @@ TF_Result GEN_Listener(TinyFrame *tf, TF_Msg *msg) {
                         break;
 
                     case 3:
+                        if(msg->data[4])FanOff();
                         Pin3SetTo((GPIO_PinState)msg->data[4]);
                         break;
 
@@ -379,10 +468,12 @@ TF_Result GEN_Listener(TinyFrame *tf, TF_Msg *msg) {
                         break;
 
                     case 5:
+                        if(msg->data[4])FanOff();
                         Pin5SetTo((GPIO_PinState)msg->data[4]);
                         break;
 
                     case 6:
+                        if(msg->data[4])FanOff();
                         Pin6SetTo((GPIO_PinState)msg->data[4]);
                         break;
                     }
@@ -429,6 +520,8 @@ void RS485_Init(void) {
     if(!init_tf) {
         init_tf = TF_InitStatic(&tfapp, TF_SLAVE); // 1 = master, 0 = slave
         TF_AddGenericListener(&tfapp, GEN_Listener);
+        TF_AddTypeListener(&tfapp, FIRMWARE_UPDATE, FwAgent_Listener);
+        FwUpdateAgent_Init();
     }
     HAL_UART_Receive_IT(&huart1, &rec, 1);
 }
@@ -439,14 +532,8 @@ void RS485_Init(void) {
 */
 void RS485_Service(void) {
     uint8_t i;
-    if (IsFwUpdateActiv()) {
-        if(HAL_GetTick() > rstmr + 5000) {
-            TF_RemoveTypeListener(&tfapp, ST_FIRMWARE_REQUEST);
-            StopFwUpdate();
-            wradd = 0;
-            bcnt = 0;
-        }
-    } else if ((HAL_GetTick() - etmr) >= TF_PARSER_TIMEOUT_TICKS) {
+    FwUpdateAgent_Service();
+    if ((HAL_GetTick() - etmr) >= TF_PARSER_TIMEOUT_TICKS) {
         if (cmd) {
             switch (cmd) {
             case LOAD_DEFAULT:

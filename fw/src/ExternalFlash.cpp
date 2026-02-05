@@ -1,4 +1,5 @@
 #include "ExternalFlash.h"
+#include "LogMacros.h"
 
 ExternalFlash::ExternalFlash(int csPin, SPIClass& spiBus) : _cs(csPin), _spi(spiBus) {}
 
@@ -17,21 +18,21 @@ bool ExternalFlash::begin() {
     digitalWrite(_cs, HIGH);
     delay(100); // Much longer delay after wake-up
     
-    Serial.println("ExtFlash: Testing SPI communication...");
-    Serial.printf("ExtFlash: CS pin state: %d\n", digitalRead(_cs));
+    LOG_INFO_LN("ExtFlash: Testing SPI communication...");
+    LOG_DEBUG_F("ExtFlash: CS pin state: %d\n", digitalRead(_cs));
     
     // Try to read JEDEC ID multiple times with delays
     for (int attempt = 0; attempt < 5; attempt++) {
         uint32_t jedecId = readJEDECID();
-        Serial.printf("ExtFlash: Attempt %d - JEDEC ID: 0x%06X\n", attempt + 1, jedecId);
+        LOG_DEBUG_F("ExtFlash: Attempt %d - JEDEC ID: 0x%06X\n", attempt + 1, jedecId);
         
         if (jedecId != 0x000000 && jedecId != 0xFFFFFF) {
-            Serial.printf("ExtFlash: Valid device found! Manufacturer: 0x%02X, Type: 0x%02X, Capacity: 0x%02X\n",
+            LOG_INFO("ExtFlash: Valid device found! Manufacturer: 0x%02X, Type: 0x%02X, Capacity: 0x%02X\n",
                          (jedecId >> 16) & 0xFF, (jedecId >> 8) & 0xFF, jedecId & 0xFF);
             
             // Set QE bit to disable /HOLD and /WP functionality
             // This converts them to IO3/IO2, eliminating floating /HOLD issue
-            Serial.println("ExtFlash: Setting QE bit to disable /HOLD...");
+            LOG_INFO_LN("ExtFlash: Setting QE bit to disable /HOLD...");
             writeEnable();
             
             // Write Status Register to set QE=1 (bit 9, in SR2)
@@ -46,7 +47,7 @@ bool ExternalFlash::begin() {
             digitalWrite(_cs, HIGH);
             delay(20); // Wait for write to complete
             
-            Serial.println("ExtFlash: QE bit set, /HOLD is now disabled");
+            LOG_INFO_LN("ExtFlash: QE bit set, /HOLD is now disabled");
             
             // Now do global block unlock
             writeEnable();
@@ -68,7 +69,7 @@ bool ExternalFlash::begin() {
         delay(50);
     }
     
-    Serial.println("ExtFlash: No device found or invalid ID!");
+    LOG_ERROR_LN("ExtFlash: No device found or invalid ID!");
     return false;
 }
 
@@ -80,14 +81,14 @@ uint32_t ExternalFlash::readJEDECID() {
     
     // Send JEDEC ID command
     uint8_t cmd_response = _spi.transfer(W25Q_JEDEC_ID);
-    Serial.printf("ExtFlash: CMD response: 0x%02X\n", cmd_response);
+    LOG_DEBUG_F("ExtFlash: CMD response: 0x%02X\n", cmd_response);
     
     // Read 3 bytes
     uint8_t mfr = _spi.transfer(0x00);
     uint8_t type = _spi.transfer(0x00);
     uint8_t cap = _spi.transfer(0x00);
     
-    Serial.printf("ExtFlash: Raw bytes: MFR=0x%02X, Type=0x%02X, Cap=0x%02X\n", mfr, type, cap);
+    LOG_DEBUG_F("ExtFlash: Raw bytes: MFR=0x%02X, Type=0x%02X, Cap=0x%02X\n", mfr, type, cap);
     
     _spi.endTransaction();
     
@@ -117,7 +118,7 @@ void ExternalFlash::writeEnable() {
     
     // Verify WEL bit
     uint8_t s = readStatus();
-    if (!(s & 0x02)) Serial.printf("ExtFlash: WriteEnable FAILED! Status: 0x%02X\n", s);
+    if (!(s & 0x02)) LOG_ERROR("ExtFlash: WriteEnable FAILED! Status: 0x%02X\n", s);
 }
 
 uint8_t ExternalFlash::readStatus() {
@@ -156,7 +157,7 @@ void ExternalFlash::eraseBlock64K(uint32_t addr) {
     
     // Debug: Check if WEL is set
     // uint8_t s = readStatus();
-    // if (!(s & 0x02)) Serial.printf("ExtFlash: Erase Block %08X - WEL NOT SET! Status: 0x%02X\n", addr, s);
+    // if (!(s & 0x02)) LOG_ERROR("ExtFlash: Erase Block %08X - WEL NOT SET! Status: 0x%02X\n", addr, s);
 
     digitalWrite(_cs, LOW);
     delayMicroseconds(1);
@@ -171,7 +172,7 @@ void ExternalFlash::eraseBlock64K(uint32_t addr) {
     delayMicroseconds(1);
     digitalWrite(_cs, HIGH);
     
-    // Serial.printf("ExtFlash: Erase Block %08X command sent.\n", addr);
+    // LOG_DEBUG_F("ExtFlash: Erase Block %08X command sent.\n", addr);
     waitUntilReady();
 }
 

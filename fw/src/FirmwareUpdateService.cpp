@@ -1,4 +1,5 @@
 #include "FirmwareUpdateService.h"
+#include "LogMacros.h"
 
 // STM32 CRC32 Polynomial
 #define CRC32_POLYNOMIAL 0x04C11DB7
@@ -38,7 +39,8 @@ static uint32_t stm32_crc32_update(uint32_t crc, const uint8_t *data, size_t len
 }
 
 FirmwareUpdateService::FirmwareUpdateService(ExternalFlash& flash, TinyFrame& tf) 
-    : _flash(flash), _tf(tf), _state(UPD_IDLE) {}
+    : _flash(flash), _tf(tf), _state(UPD_IDLE), _lastProgress(0), _lastProgressTime(0), 
+      _wasCompleted(false), _lastTerminalState(UPD_IDLE) {}
 
 bool FirmwareUpdateService::startUpdate(uint8_t fromSlot, uint8_t targetAddr, uint32_t stagingAddr) {
     if (_state != UPD_IDLE) return false;
@@ -47,19 +49,19 @@ bool FirmwareUpdateService::startUpdate(uint8_t fromSlot, uint8_t targetAddr, ui
     if (fromSlot < 4) {
         // Standard Firmware Slot (0-3) - Info is embedded at 0x2000
         if (!_flash.getSlotInfo(fromSlot, &_fwInfo)) {
-            Serial.println("UpdateService: Failed to read slot info");
+            LOG_ERROR_LN("UpdateService: Failed to read slot info");
             return false;
         }
     } else {
         // Raw Binary Slot (4-7) - Info is at offset 0 (RawSlotInfoTypeDef)
         RawSlotInfoTypeDef rawInfo;
         if (!_flash.readBufferFromSlot(fromSlot, RAW_SLOT_HEADER_OFFSET, (uint8_t*)&rawInfo, sizeof(RawSlotInfoTypeDef))) {
-            Serial.println("UpdateService: Failed to read raw slot info");
+            LOG_ERROR_LN("UpdateService: Failed to read raw slot info");
             return false;
         }
         
         if (rawInfo.magic != RAW_SLOT_MAGIC || rawInfo.valid != 1) {
-            Serial.println("UpdateService: Invalid Raw Slot (Magic/Valid)");
+            LOG_ERROR_LN("UpdateService: Invalid Raw Slot (Magic/Valid)");
             return false;
         }
 
@@ -72,15 +74,15 @@ bool FirmwareUpdateService::startUpdate(uint8_t fromSlot, uint8_t targetAddr, ui
 
     // Sanity check
     if (_fwInfo.size == 0 || _fwInfo.size > FW_SLOT_SIZE) {
-        Serial.println("UpdateService: Invalid FW size");
+        LOG_ERROR_LN("UpdateService: Invalid FW size");
         return false;
     }
 
     // Verify CRC of the stored file BEFORE sending
-    Serial.println("UpdateService: Verifying storage CRC...");
+    LOG_INFO_LN("UpdateService: Verifying storage CRC...");
     uint32_t calculatedCRC = calcCRC32(fromSlot);
     if (calculatedCRC != _fwInfo.crc32) {
-        Serial.printf("UpdateService: CRC Mismatch! Stored: %08X, Calc: %08X\n", _fwInfo.crc32, calculatedCRC);
+        LOG_ERROR("UpdateService: CRC Mismatch! Stored: %08X, Calc: %08X\n", _fwInfo.crc32, calculatedCRC);
         // return false; // TODO: Uncomment this in production, disabled for testing if needed
     }
 
@@ -92,8 +94,12 @@ bool FirmwareUpdateService::startUpdate(uint8_t fromSlot, uint8_t targetAddr, ui
     _currentSeq = 0;
     _retryCount = 0;
     _progress = 0;
+    _lastProgress = 0;
+    _lastProgressTime = millis();
+    _wasCompleted = false;
+    _lastTerminalState = UPD_IDLE;
     
-    Serial.printf("UpdateService: Starting update for ID %d from Slot %d (Size: %d bytes)\n", targetAddr, fromSlot, _fileSize);
+    LOG_INFO("UpdateService: Starting update for ID %d from Slot %d (Size: %d bytes)\n", targetAddr, fromSlot, _fileSize);
     
     _state = UPD_STARTING;
     return true;
@@ -128,18 +134,27 @@ void FirmwareUpdateService::reset() {
     _lastPacketSize = 0;
     _retryCount = 0;
     _progress = 0;
+    _lastProgress = 0;
+    _lastProgressTime = 0;
+    _wasCompleted = false;
+    _lastTerminalState = UPD_IDLE;
     _lastError[0] = '\0';
     memset(&_fwInfo, 0, sizeof(FwInfoTypeDef));
 }
 
 void FirmwareUpdateService::loop() {
-    // Auto-reset 5 sekundi nakon terminal state
+    // Terminal state retention - drži SUCCESS/FAILED 60 sekundi (6× frontend polling interval)
     static unsigned long terminalStateTime = 0;
     if (_state == UPD_SUCCESS || _state == UPD_FAILED) {
         if (terminalStateTime == 0) {
             terminalStateTime = millis();
-        } else if (millis() - terminalStateTime > 5000) {
-            Serial.printf("UpdateService: Auto-reset after %s\n", _state == UPD_SUCCESS ? "SUCCESS" : "FAILED");
+            _wasCompleted = true;
+            _lastTerminalState = _state;
+            LOG_INFO("UpdateService: Entered terminal state %s - retention for %dms\n", 
+                     _state == UPD_SUCCESS ? "SUCCESS" : "FAILED", TERMINAL_STATE_RETENTION_MS);
+        } else if (millis() - terminalStateTime > TERMINAL_STATE_RETENTION_MS) {
+            LOG_INFO("UpdateService: Auto-reset after %s (retention expired)\n", 
+                     _state == UPD_SUCCESS ? "SUCCESS" : "FAILED");
             reset();
             terminalStateTime = 0;
         }
@@ -150,6 +165,21 @@ void FirmwareUpdateService::loop() {
     if (_state == UPD_IDLE) return;
 
     unsigned long now = millis();
+
+    // No-progress timeout detekcija - ako progress ne raste 30 sekundi = FAIL
+    if (_state == UPD_SENDING_DATA || _state == UPD_WAIT_DATA_ACK) {
+        if (_progress != _lastProgress) {
+            // Progress se promenio - resetuj timer
+            _lastProgress = _progress;
+            _lastProgressTime = now;
+        } else if (now - _lastProgressTime > NO_PROGRESS_TIMEOUT_MS) {
+            // Nema progresa duže od 30s
+            snprintf(_lastError, sizeof(_lastError), "No progress for %dms at %d%%", NO_PROGRESS_TIMEOUT_MS, _progress);
+            LOG_ERROR("UpdateService: %s - ABORTING\n", _lastError);
+            abort();
+            return;
+        }
+    }
 
     switch (_state) {
         case UPD_STARTING:
@@ -169,7 +199,7 @@ void FirmwareUpdateService::loop() {
         case UPD_WAIT_FINISH_ACK:
             if (now - _timerStart > (_state == UPD_WAIT_START_ACK ? FLASH_WRITE_TIMEOUT_MS : RESPONSE_TIMEOUT_MS)) {
                 if (_retryCount < MAX_UPDATE_RETRIES) {
-                    Serial.printf("UpdateService: Timeout (State %d), Retrying (%d/%d)...\n", _state, _retryCount+1, MAX_UPDATE_RETRIES);
+                    LOG_INFO("UpdateService: Timeout (State %d), Retrying (%d/%d)...\n", _state, _retryCount+1, MAX_UPDATE_RETRIES);
                     _retryCount++;
                     // Revert state to resend
                     if (_state == UPD_WAIT_START_ACK) _state = UPD_STARTING;
@@ -177,7 +207,7 @@ void FirmwareUpdateService::loop() {
                     else if (_state == UPD_WAIT_FINISH_ACK) _state = UPD_FINISHING;
                 } else {
                     snprintf(_lastError, sizeof(_lastError), "Timeout after %d retries (State %d)", MAX_UPDATE_RETRIES, _state);
-                    Serial.printf("UpdateService: %s\n", _lastError);
+                    LOG_ERROR("UpdateService: %s\n", _lastError);
                     abort();
                 }
             }
@@ -205,7 +235,7 @@ void FirmwareUpdateService::sendStartRequest() {
     
     _timerStart = millis();
     _state = UPD_WAIT_START_ACK;
-    Serial.println("UpdateService: Sent START_REQUEST");
+    LOG_INFO_LN("UpdateService: Sent START_REQUEST");
 }
 
 void FirmwareUpdateService::sendDataPacket() {
@@ -220,7 +250,7 @@ void FirmwareUpdateService::sendDataPacket() {
 
     // Read from Flash
     if (!_flash.readBufferFromSlot(_activeSlot, readOffset, _chunkBuffer, chunk)) {
-        Serial.println("UpdateService: Flash Read Error!");
+        LOG_ERROR_LN("UpdateService: Flash Read Error!");
         abort();
         return;
     }
@@ -237,7 +267,7 @@ void FirmwareUpdateService::sendDataPacket() {
     _lastPacketSize = chunk;
     _timerStart = millis();
     _state = UPD_WAIT_DATA_ACK;
-    // Serial.printf("UpdateService: Sent DATA Seq %d (Len %d)\n", _currentSeq, chunk);
+    // LOG_DEBUG_F("UpdateService: Sent DATA Seq %d (Len %d)\n", _currentSeq, chunk);
 }
 
 void FirmwareUpdateService::sendFinishRequest() {
@@ -250,7 +280,7 @@ void FirmwareUpdateService::sendFinishRequest() {
 
     _timerStart = millis();
     _state = UPD_WAIT_FINISH_ACK;
-    Serial.println("UpdateService: Sent FINISH_REQUEST");
+    LOG_INFO_LN("UpdateService: Sent FINISH_REQUEST");
 }
 
 TF_Result FirmwareUpdateService::handlePacket(TinyFrame *tf, TF_Msg *msg) {
@@ -267,7 +297,7 @@ TF_Result FirmwareUpdateService::handlePacket(TinyFrame *tf, TF_Msg *msg) {
     switch (subCmd) {
         case SUB_CMD_START_ACK:
             if (_state == UPD_WAIT_START_ACK) {
-                Serial.println("UpdateService: START_ACK received.");
+                LOG_INFO_LN("UpdateService: START_ACK received.");
                 _state = UPD_SENDING_DATA;
                 _retryCount = 0;
             }
@@ -286,7 +316,7 @@ TF_Result FirmwareUpdateService::handlePacket(TinyFrame *tf, TF_Msg *msg) {
                         _progress = (_bytesSent * 100) / _fileSize;
                         
                         if (_bytesSent >= _fileSize) {
-                            Serial.println("UpdateService: File sent. Finishing...");
+                            LOG_INFO_LN("UpdateService: File sent. Finishing...");
                             _state = UPD_FINISHING;
                         } else {
                             _state = UPD_SENDING_DATA;
@@ -298,7 +328,7 @@ TF_Result FirmwareUpdateService::handlePacket(TinyFrame *tf, TF_Msg *msg) {
 
         case SUB_CMD_FINISH_ACK:
             if (_state == UPD_WAIT_FINISH_ACK) {
-                Serial.println("UpdateService: UPDATE COMPLETE!");
+                LOG_INFO_LN("UpdateService: UPDATE COMPLETE!");
                 _state = UPD_SUCCESS;
                 _progress = 100;
             }
@@ -317,7 +347,7 @@ TF_Result FirmwareUpdateService::handlePacket(TinyFrame *tf, TF_Msg *msg) {
                                   subCmd == SUB_CMD_DATA_NACK ? "DATA" : "FINISH";
             snprintf(_lastError, sizeof(_lastError), "NACK %s: %s (%d)", 
                      typeStr, nackReason < 8 ? reasonStr[nackReason] : "UNKNOWN", nackReason);
-            Serial.printf("UpdateService: %s\n", _lastError);
+            LOG_ERROR("UpdateService: %s\n", _lastError);
             // Force timeout logic to handle retry
             _timerStart = 0; 
             break;

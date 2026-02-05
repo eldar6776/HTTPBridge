@@ -17,6 +17,7 @@
 #include <DallasTemperature.h>
 #include "ExternalFlash.h"
 #include "FirmwareUpdateService.h"
+#include "LogMacros.h"
 
 extern "C"
 {
@@ -95,7 +96,6 @@ IRac ac(IR_PIN);
 #define HOLD_TIME 5000 // 5 sekundi WiFi reset putem dugmeta (BOOT dugme)
 
 
-
 char _ssid[64] = "";
 char _pass[64] = "";
 char _mdns[64] = "";
@@ -110,12 +110,51 @@ int _port = 80;
 bool timeValid = false;
 bool overrideActive = false;
 bool overrideState = false;
+bool lastTimerState = false;  // Prethodno stanje timera (za detekciju promene)
 int rdy, replyDataLength;
 volatile bool httpHandlerWaiting = false;  // Flag za blokiranje loop() čitanja
 bool pingWatchdogEnabled = false;
 unsigned long lastPingTime = 0;
 int pingFailures = 0;
 unsigned long lastReadTime = 0;
+
+// ========== GET_STATUS WATCHDOG (Hardware Timer) ==========
+#define CMD_GET_STATUS_TIMEOUT_SEC 600 // 10 minuta u sekundama
+hw_timer_t *getStatusWatchdog = NULL;
+volatile bool getStatusWatchdogTriggered = false;
+
+// Timer callback - poziva se kada istekne 10 minuta bez GET_STATUS
+void IRAM_ATTR onGetStatusTimeout() {
+  getStatusWatchdogTriggered = true;
+}
+
+// Funkcija za reset watchdog tajmera (poziva se svaki put kad dođe GET_STATUS)
+void resetGetStatusWatchdog() {
+  if (getStatusWatchdog != NULL) {
+    timerWrite(getStatusWatchdog, 0); // Reset timer counter na 0
+    LOG_DEBUG("[Watchdog] Timer reset\n");
+  }
+}
+
+// Funkcija za inicijalizaciju watchdog tajmera
+void initGetStatusWatchdog() {
+  // Timer 0, prescaler 80 (1 MHz clock), counting up
+  getStatusWatchdog = timerBegin(0, 80, true);
+  
+  // Attach callback funkciju
+  timerAttachInterrupt(getStatusWatchdog, &onGetStatusTimeout, true);
+  
+  // Postavi alarm na 600 sekundi (10 minuta)
+  // 1 MHz clock -> 1,000,000 ticks = 1 sekunda
+  timerAlarmWrite(getStatusWatchdog, CMD_GET_STATUS_TIMEOUT_SEC * 1000000ULL, false);
+  
+  // Pokreni timer
+  timerAlarmEnable(getStatusWatchdog);
+  
+  LOG_INFO("[Watchdog] Initialized: %d seconds timeout\n", CMD_GET_STATUS_TIMEOUT_SEC);
+}
+// ===========================================================
+
 float fluid = 0.0;          // Fluid temperature
 float emaTemperature = 0.0; // EMA filter
 float emaAlpha = 0.2;       // podesiv u prefs
@@ -156,6 +195,8 @@ const int usedPins[] = { // NOLINT(cert-err58-cpp)
     FLASH_SCK,          // GPIO 18 - SPI Flash SCK
     FLASH_MISO,         // GPIO 19 - SPI Flash MISO
     20,                 // Ne postoji na većini ESP32 modula
+    IR_PIN,            // GPIO 21 - IR Transmitter
+    22,                 // Ne postoji 
     FLASH_MOSI,         // GPIO 23 - SPI Flash MOSI
     24,                 // Ne postoji
     FAN_L, FAN_M, FAN_H, // GPIO 25, 26, 27 - Ventilator
@@ -658,7 +699,7 @@ void startPulse(int pin, unsigned long durationMs = 2000)
     }
   }
 
-  Serial.println("No available pulse slots!");
+  LOG_ERROR("No available pulse slots!");
 }
 /**
  * ONBOARD LED ZA PRIKAZ AKTIVNOSTI
@@ -871,15 +912,15 @@ String getAvailablePinsStatus()
  */
 TF_Result ID_Listener(TinyFrame *tf, TF_Msg *msg)
 {
-  Serial.printf("=== ID_Listener: received %d bytes, frame_id=0x%02X, type=0x%02X ===\n", 
+  LOG_INFO("=== ID_Listener: received %d bytes, frame_id=0x%02X, type=0x%02X ===\n", 
                 msg->len, msg->frame_id, msg->type);
-  Serial.print("Data: ");
+  LOG_DEBUG("Data: ");
   for (int i = 0; i < msg->len && i < 50; i++) {
-    if (msg->data[i] < 0x10) Serial.print('0');
-    Serial.print(msg->data[i], HEX);
-    Serial.print(' ');
+    if (msg->data[i] < 0x10) LOG_DEBUG("0");
+    LOG_DEBUG_HEX(msg->data[i]);
+    LOG_DEBUG(" ");
   }
-  Serial.println();
+  LOG_DEBUG_LN();
   
   replyDataLength = msg->len;
   memcpy(replyData, msg->data, msg->len);
@@ -891,7 +932,7 @@ TF_Result ID_Listener(TinyFrame *tf, TF_Msg *msg)
  */
 TF_Result SOS_Listener(TinyFrame *tf, TF_Msg *msg)
 {
-  Serial.println("⚠️ SOS Signal primljen iz toaleta!");
+  LOG_INFO_LN("⚠️ SOS Signal primljen iz toaleta!");
   sosStatus = true;
   sosTimestamp = millis();
   
@@ -901,7 +942,7 @@ TF_Result SOS_Listener(TinyFrame *tf, TF_Msg *msg)
   preferences.putULong("timestamp", time(nullptr)); // UNIX timestamp u sekundama
   preferences.end();
   
-  Serial.printf("✅ SOS događaj sačuvan u memoriju (timestamp: %lu)\n", time(nullptr));
+  LOG_INFO_LN("✅ SOS događaj sačuvan u memoriju (timestamp: %lu)", time(nullptr));
   
   // Pošalji potvrdu prijema
   TF_Respond(tf, msg);
@@ -941,7 +982,7 @@ TF_Result IR_Listener(TinyFrame *tf, TF_Msg *msg)
       ac.next.fanspeed = stdAc::fanspeed_t::kAuto;
 
       // Send the signal
-      Serial.printf("📡 Sending IR: Proto=%d, Power=%d, Mode=%d, Temp=%d\n", 
+      LOG_INFO_LN("📡 Sending IR: Proto=%d, Power=%d, Mode=%d, Temp=%d", 
                     protoID, ac.next.power, (int)ac.next.mode, ac.next.degrees);
       ac.sendAc(); 
     }
@@ -957,12 +998,12 @@ TF_Result IR_Listener(TinyFrame *tf, TF_Msg *msg)
     irData.received = true;
     irData.timestamp = millis();
     
-    Serial.printf("📡 IR Data Received: ctrl=%d, state=%d, temp=%d.%02d°C, sp=%d°C, fan=%d/%d\n",
+    LOG_INFO_LN("📡 IR Data Received: ctrl=%d, state=%d, temp=%d.%02d°C, sp=%d°C, fan=%d/%d",
                   irData.th_ctrl, irData.th_state, 
                   irData.mv_temp / 100, irData.mv_temp % 100,
                   irData.sp_temp, irData.fan_ctrl, irData.fan_speed);
   } else {
-    Serial.printf("⚠️ IR_Listener: Neočekivana dužina paketa (%d), očekivano 8\n", msg->len);
+    LOG_ERROR("⚠️ IR_Listener: Neočekivana dužina paketa (%d), očekivano 8", msg->len);
   }
   
   // Pošalji potvrdu prijema
@@ -1145,10 +1186,10 @@ void updateLightState()
   int tzOffsetMinutes = dstActive ? 120 : 60;
 
   // DEBUG
-  Serial.println("----- updateLightState -----");
-  Serial.printf("UTC: %02d:%02d\n", utc_tm.tm_hour, utc_tm.tm_min);
-  Serial.printf("DST active: %s\n", dstActive ? "YES" : "NO");
-  Serial.printf("Timezone offset: %d min\n", tzOffsetMinutes);
+  LOG_DEBUG_LN("----- updateLightState -----");
+  LOG_DEBUG_F("UTC: %02d:%02d\n", utc_tm.tm_hour, utc_tm.tm_min);
+  LOG_DEBUG_F("DST active: %s\n", dstActive ? "YES" : "NO");
+  LOG_DEBUG_F("Timezone offset: %d min\n", tzOffsetMinutes);
 
   // Postavi sunčev datum tačno
   sun.setPosition(LATITUDE, LONGITUDE, 0);
@@ -1160,8 +1201,8 @@ void updateLightState()
   int sunriseMin = ((int)sunriseUTC + tzOffsetMinutes + 1440) % 1440;
   int sunsetMin = ((int)sunsetUTC + tzOffsetMinutes + 1440) % 1440;
 
-  Serial.printf("Sunrise: %.2f -> %02d:%02d\n", sunriseUTC, sunriseMin / 60, sunriseMin % 60);
-  Serial.printf("Sunset: %.2f -> %02d:%02d\n", sunsetUTC, sunsetMin / 60, sunsetMin % 60);
+  LOG_DEBUG_F("Sunrise: %.2f -> %02d:%02d\n", sunriseUTC, sunriseMin / 60, sunriseMin % 60);
+  LOG_DEBUG_F("Sunset: %.2f -> %02d:%02d\n", sunsetUTC, sunsetMin / 60, sunsetMin % 60);
 
   int onMin = -1, offMin = -1;
 
@@ -1181,8 +1222,8 @@ void updateLightState()
 
   int localMinutes = (utc_tm.tm_hour * 60 + utc_tm.tm_min + tzOffsetMinutes) % 1440;
 
-  Serial.printf("Current time (local min): %d (%02d:%02d)\n", localMinutes, localMinutes / 60, localMinutes % 60);
-  Serial.printf("ON=%d (%02d:%02d), OFF=%d (%02d:%02d)\n",
+  LOG_DEBUG_F("Current time (local min): %d (%02d:%02d)\n", localMinutes, localMinutes / 60, localMinutes % 60);
+  LOG_DEBUG_F("ON=%d (%02d:%02d), OFF=%d (%02d:%02d)\n",
                 onMin, onMin / 60, onMin % 60, offMin, offMin / 60, offMin % 60);
 
   bool lightShouldBeOn = false;
@@ -1195,29 +1236,38 @@ void updateLightState()
       lightShouldBeOn = (localMinutes >= onMin || localMinutes < offMin);
   }
 
-  // OVDJE DODAJEMO OVERRIDE MEHANIZAM
+  // OVERRIDE MEHANIZAM - Resetuj override samo kada timer PROMENI stanje (sunrise/sunset event)
   if (overrideActive)
   {
-    // Ako se trenutni izlaz po timeru razlikuje od onoga što je korisnik ručno postavio
-    if (lightShouldBeOn != overrideState)
+    // Proveri da li je došlo do PROMENE stanja timera (timer event)
+    if (lastTimerState != lightShouldBeOn)
     {
-      Serial.println("Timer event take control, override reset.");
-      clearOutdoorLightOverride(); // resetuj override
+      // Timer je promenio stanje (npr. došao je sunrise ili sunset)
+      LOG_INFO("Timer event detected: %s -> %s. Override reset.\n", 
+               lastTimerState ? "ON" : "OFF", lightShouldBeOn ? "ON" : "OFF");
+      clearOutdoorLightOverride(); // Resetuj override i pusti timer da preuzme
+      lastTimerState = lightShouldBeOn;
+      digitalWrite(LIGHT_PIN, lightShouldBeOn ? HIGH : LOW);
+      lightState = lightShouldBeOn;
     }
     else
     {
-      // Još uvek smo u skladu sa ručnim stanjem, ne diramo izlaz
-      Serial.println("Override activ, skip change.");
-      return;
+      // Timer nije promenio stanje, zadržavamo override
+      LOG_DEBUG_F("Override active, timer unchanged. Keeping override state: %s\n", 
+                overrideState ? "ON" : "OFF");
+      return; // Ne diraj pin, ostavi override stanje
     }
   }
+  else
+  {  
+    // Nema override-a, primeni timer stanje
+    lastTimerState = lightShouldBeOn;
+    digitalWrite(LIGHT_PIN, lightShouldBeOn ? HIGH : LOW);
+    lightState = lightShouldBeOn;
+  }
 
-  // Ako nismo u override režimu, upravljaj izlazom
-  digitalWrite(LIGHT_PIN, lightShouldBeOn ? HIGH : LOW);
-  lightState = lightShouldBeOn;
-
-  Serial.printf("Light should be: %s\n", lightShouldBeOn ? "ON" : "OFF");
-  Serial.println("----------------------------");
+  LOG_DEBUG_F("Light should be: %s\n", lightShouldBeOn ? "ON" : "OFF");
+  LOG_DEBUG_LN("----------------------------");
 }
 /**
  * TIMER PROVJERE KONTROLE VANJSKE RASVJETE
@@ -1252,7 +1302,7 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
 
   case CMD_RESTART:
   {
-    Serial.println("Device restart...");
+    LOG_INFO_LN("Device restart...");
     sendJsonSuccess(request, "Restart in 3s");
     delay(3000);
     ESP.restart();
@@ -1859,9 +1909,9 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
     // Offset u minutama: 60 za CET (zimsko), 120 za CEST (ljetno)
     int tzOffsetMinutes = dstActive ? 120 : 60;
 
-    Serial.printf("UTC Time    : %02d:%02d\n", utc_tm.tm_hour, utc_tm.tm_min);
-    Serial.printf("DST active  : %d\n", dstActive);
-    Serial.printf("Offset (min): %d\n", tzOffsetMinutes);
+    LOG_DEBUG_F("UTC Time    : %02d:%02d\n", utc_tm.tm_hour, utc_tm.tm_min);
+    LOG_DEBUG_F("DST active  : %d\n", dstActive);
+    LOG_DEBUG_F("Offset (min): %d\n", tzOffsetMinutes);
 
     sun.setPosition(LATITUDE, LONGITUDE, 0);
     sun.setCurrentDate(utc_tm.tm_year + 1900, utc_tm.tm_mon + 1, utc_tm.tm_mday);
@@ -1888,8 +1938,8 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
       sprintf(sunriseStr, "%02d:%02d", sunriseHour, sunriseMinute);
       sprintf(sunsetStr, "%02d:%02d", sunsetHour, sunsetMinute);
 
-      Serial.printf("SUNRISE local: %s\n", sunriseStr);
-      Serial.printf("SUNSET  local: %s\n", sunsetStr);
+      LOG_DEBUG_F("SUNRISE local: %s\n", sunriseStr);
+      LOG_DEBUG_F("SUNSET  local: %s\n", sunsetStr);
     }
 
     bool relayState = digitalRead(LIGHT_PIN);
@@ -2107,6 +2157,9 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
   }
   case CMD_GET_STATUS:
   {
+    // Reset watchdog timer - dobili smo GET_STATUS komandu
+    resetGetStatusWatchdog();
+    
     time_t now;
     time(&now);
     struct tm utc_tm = *gmtime(&now);
@@ -2508,7 +2561,7 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
     preferences.clear(); // Briše sve iz sos_event namespace-a
     preferences.end();
     
-    Serial.println("✅ SOS događaj resetovan i obrisan iz memorije");
+    LOG_INFO_LN("✅ SOS događaj resetovan i obrisan iz memorije");
     sendJsonSuccess(request, "SOS event cleared from memory");
     return;
   }
@@ -2637,15 +2690,15 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
 
   if (buf[0] && length)
   {
-    Serial.print("Sending command: ");
+    LOG_DEBUG("Sending command: ");
     for (int i = 0; i < length; i++)
     {
       if (buf[i] < 0x10)
-        Serial.print('0');
-      Serial.print(buf[i], HEX);
-      Serial.print(' ');
+        LOG_DEBUG("0");
+      LOG_DEBUG_HEX(buf[i]);
+      LOG_DEBUG(" ");
     }
-    Serial.println();
+    LOG_DEBUG_LN();
     
     // Blokiraj loop() od čitanja Serial2 ŠTO PRIJE!
     httpHandlerWaiting = true;
@@ -2657,10 +2710,10 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
       flushed++;
     }
     if (flushed > 0) {
-      Serial.printf(">>> Flushed %d old bytes from Serial2 buffer\n", flushed);
+      LOG_DEBUG_F(">>> Flushed %d old bytes from Serial2 buffer\n", flushed);
     }
     
-    Serial.printf(">>> Starting TF_QuerySimple, rdy=%d\n", TF_PARSER_TIMEOUT_TICKS * 10);
+    LOG_DEBUG_F(">>> Starting TF_QuerySimple, rdy=%d\n", TF_PARSER_TIMEOUT_TICKS * 10);
     // TF_SendSimple(&tfapp, S_CUSTOM, buf, length);
     TF_QuerySimple(&tfapp, S_CUSTOM, buf, length, ID_Listener, TF_PARSER_TIMEOUT_TICKS * 10);
     rdy = TF_PARSER_TIMEOUT_TICKS * 10;
@@ -2672,7 +2725,7 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
       {
         uint8_t b = Serial2.read();
         bytesRead++;
-        Serial.printf("[0x%02X]", b);
+        LOG_DEBUG_F("[0x%02X]", b);
         TF_AcceptChar(&tfapp, b);
         
         // PREKINI ODMAH ako je ID_Listener postavio rdy = -1
@@ -2693,16 +2746,16 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
     // Deblokiraj loop()
     httpHandlerWaiting = false;
     
-    Serial.printf("\n>>> Wait loop finished, rdy=%d, bytes read=%d\n", rdy, bytesRead);
+    LOG_DEBUG_F("\n>>> Wait loop finished, rdy=%d, bytes read=%d\n", rdy, bytesRead);
 
     if (rdy == 0)
     {
-      Serial.println(">>> TIMEOUT detected!");
+      LOG_ERROR_LN(">>> TIMEOUT detected!");
       sendJsonError(request, 408, "Timeout: No response from device");
     }
     else
     {
-      Serial.println(">>> Response received, processing...");
+      LOG_INFO_LN(">>> Response received, processing...");
       JsonDocument responseDoc;
 
       // Special handling for QR_CODE_GET because response might not start with CMD byte
@@ -2933,13 +2986,13 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
                 replyData[7], replyData[8], replyData[9], replyData[10], replyData[11]);
         
         // Debug: Print raw bytes to Serial
-        Serial.print("LOG RAW DATA: ");
+        LOG_DEBUG("LOG RAW DATA: ");
         for (int i = 2; i < 18; i++) {
-          if (replyData[i] < 0x10) Serial.print('0');
-          Serial.print(replyData[i], HEX);
-          Serial.print(' ');
+          if (replyData[i] < 0x10) LOG_DEBUG("0");
+          LOG_DEBUG_HEX(replyData[i]);
+          LOG_DEBUG(" ");
         }
-        Serial.println();
+        LOG_DEBUG_LN();
         
         // Date/Time (BCD format)
         uint8_t day = bcdToDec(replyData[12]);
@@ -3193,7 +3246,7 @@ void sendRtcToBus()
 
   if (timeInfo == nullptr)
   {
-    Serial.println("[RTC SEND] Greška: timeInfo je nullptr");
+    LOG_ERROR_LN("[RTC SEND] Greška: timeInfo je nullptr");
     return;
   }
 
@@ -3208,21 +3261,21 @@ void sendRtcToBus()
   buf[7] = toBCD(timeInfo->tm_min);                               // Minut u BCD
   buf[8] = toBCD(timeInfo->tm_sec);                               // Sekund u BCD
 
-  Serial.print("RTC Buf: ");
+  LOG_DEBUG("RTC Buf: ");
   for (int i = 0; i < 9; i++)
   {
-    Serial.printf("%02X ", buf[i]);
+    LOG_DEBUG_F("%02X ", buf[i]);
   }
-  Serial.println();
+  LOG_DEBUG_LN();
 
   bool sent = TF_SendSimple(&tfapp, S_CUSTOM, buf, sizeof(buf));
   if (!sent)
   {
-    Serial.println("RTC Update ERROR !");
+    LOG_ERROR_LN("RTC Update ERROR !");
   }
   else
   {
-    Serial.println("RTC Update OK");
+    LOG_INFO_LN("RTC Update OK");
   }
 }
 /**
@@ -3245,14 +3298,14 @@ void tryConnectWiFi()
     if (strlen(_pass) > 0)
     {
       WiFi.begin(_ssid, _pass);
-      Serial.print("🔌 Connecting on WiFi (with password): ");
-      Serial.println(_ssid);
+      LOG_INFO("🔌 Connecting on WiFi (with password): ");
+      LOG_INFO_LN("%s", _ssid);
     }
     else
     {
       WiFi.begin(_ssid); // pokušaj spojiti bez lozinke
-      Serial.print("🔌 Connecting on WiFi (no password): "); // NOLINT(performance-avoid-endl)
-      Serial.println(_ssid);
+      LOG_INFO("🔌 Connecting on WiFi (no password): "); // NOLINT(performance-avoid-endl)
+      LOG_INFO_LN("%s", _ssid);
     }
 
     unsigned long start = millis();
@@ -3264,25 +3317,25 @@ void tryConnectWiFi()
     if (WiFi.status() == WL_CONNECTED)
     {
       connected = true;
-      Serial.println("✅ Connected on previous network !");
-      Serial.println(WiFi.localIP());
+      LOG_INFO_LN("✅ Connected on previous network !");
+      LOG_INFO_LN("%s", WiFi.localIP().toString().c_str());
     }
     else
     {
-      Serial.println("❌ Not connected on previous network.");
+      LOG_ERROR_LN("❌ Not connected on previous network.");
     }
   }
 
   if (!connected)
   {
-    Serial.println("📶 Starting WiFiManager portal...");
+    LOG_INFO_LN("📶 Starting WiFiManager portal...");
 
     connected = wm.autoConnect("WiFiManager");
 
     if (connected)
     {
-      Serial.println("✅ Connected with portal!");
-      Serial.println(WiFi.localIP());
+      LOG_INFO_LN("✅ Connected with portal!");
+      LOG_INFO_LN("%s", WiFi.localIP().toString().c_str());
 
       preferences.begin("wifi", false);
       preferences.putString("ssid", WiFi.SSID());
@@ -3291,7 +3344,7 @@ void tryConnectWiFi()
     }
     else
     {
-      Serial.println("❌ Not connected. Restart...");
+      LOG_ERROR_LN("❌ Not connected. Restart...");
       delay(3000);
       ESP.restart();
     }
@@ -3319,16 +3372,16 @@ void setup()
   Serial2.begin(115200);
 
   // Init VSPI for External Flash
-  Serial.println("\n\n=== Initializing SPI Flash ===");
-  Serial.printf("CS Pin: %d, SCK: %d, MISO: %d, MOSI: %d\n", FLASH_CS, FLASH_SCK, FLASH_MISO, FLASH_MOSI);
+  LOG_INFO_LN("\n\n=== Initializing SPI Flash ===");
+  LOG_INFO("CS Pin: %d, SCK: %d, MISO: %d, MOSI: %d\n", FLASH_CS, FLASH_SCK, FLASH_MISO, FLASH_MOSI);
   
   vspi.begin(FLASH_SCK, FLASH_MISO, FLASH_MOSI, -1); // -1 = manual CS control
   delay(100); // Give SPI time to stabilize
   
   if (extFlash.begin()) {
-    Serial.println("External Flash Initialized");
+    LOG_INFO_LN("External Flash Initialized");
   } else {
-    Serial.println("External Flash Init FAILED");
+    LOG_ERROR_LN("External Flash Init FAILED");
   }
 
   pinMode(BOOT_PIN, INPUT_PULLUP);
@@ -3377,7 +3430,7 @@ void setup()
   }
   else
   {
-    Serial.println("Room Temperature sensor NOT found!");
+    LOG_ERROR_LN("Room Temperature sensor NOT found!");
     turnOffThermoRelays(); // sigurnosno
     th_mode = TH_OFF;      // i postavi mod u OFF
   }
@@ -3392,7 +3445,7 @@ void setup()
   }
   else
   {
-    Serial.println("\nFluid Temperature sensor NOT found!");
+    LOG_ERROR_LN("\nFluid Temperature sensor NOT found!");
   }
 
   server = std::unique_ptr<AsyncWebServer>(new AsyncWebServer(_port)); // Dinamička alokacija servera s portom iz Preferences
@@ -3404,7 +3457,7 @@ void setup()
   TF_AddTypeListener(&tfapp, S_IR, IR_Listener);
   // Registruj Firmware Update Listener
   TF_AddTypeListener(&tfapp, TF_TYPE_FIRMWARE_UPDATE, UpdateService_Listener);
-  Serial.println("✅ TinyFrame listeneri registrovani: S_SOS, S_IR, FW_UPDATE");
+  LOG_INFO_LN("✅ TinyFrame listeneri registrovani: S_SOS, S_IR, FW_UPDATE");
   
   // Učitaj SOS status iz Preferences (perzistentnost)
   preferences.begin("sos_event", true);
@@ -3412,7 +3465,7 @@ void setup()
   if (sosStatus) {
     unsigned long sosUnixTime = preferences.getULong("timestamp", 0);
     sosTimestamp = millis(); // Reset millis() timestamp za internal tracking
-    Serial.printf("⚠️ SOS događaj učitan iz memorije (timestamp: %lu)\n", sosUnixTime);
+    LOG_INFO("⚠️ SOS događaj učitan iz memorije (timestamp: %lu)\n", sosUnixTime);
   }
   preferences.end();
   
@@ -3421,11 +3474,11 @@ void setup()
   tryConnectWiFi(); // 👈 Ovde se sada samo poziva čista funkcija
 
   if (!MDNS.begin(_mdns))
-    Serial.println("⚠️ mDNS not started!");
+    LOG_ERROR_LN("⚠️ mDNS not started!");
   else
   {
     MDNS.addService("http", "tcp", _port);
-    Serial.println(String("🌐 mDNS responder started. Available on http://") + _mdns + ".local:" + _port);
+    LOG_INFO_LN("🌐 mDNS responder started. Available on http://%s.local:%d", _mdns, _port);
   }
 
   configTzTime(TIMEZONE, "pool.ntp.org");
@@ -3433,18 +3486,18 @@ void setup()
   unsigned long start = millis();
   while (time(nullptr) < 100000 && millis() - start < 10000)
   {
-    Serial.print(".");
+    LOG_INFO(".");
     delay(500);
   }
   if (time(nullptr) < 100000)
   {
     timeValid = false;
-    Serial.println("Time sync failed!");
+    LOG_ERROR_LN("Time sync failed!");
   }
   else
   {
     timeValid = true;
-    Serial.println("Time synchronized!");
+    LOG_INFO_LN("Time synchronized!");
   }
 
   loadTimerPreferences();
@@ -3454,8 +3507,8 @@ void setup()
   server->on("/sysctrl.cgi", HTTP_GET, handleSysctrlRequest);  // Handler za sysctrl.cgi
   server->on("/", HTTP_GET, [](AsyncWebServerRequest *request) // Osnovni endpoint root
              { sendJsonError(request, 200, "Online"); });
-  server->on("/update", HTTP_GET, [](AsyncWebServerRequest *request) // Prikazivanje forme za update
-             { request->send(200, "text/html", update_form_html); });
+  server->on("/update", HTTP_GET, [](AsyncWebServerRequest *request) // /update GET vraća isto kao root (bez forme)
+             { sendJsonError(request, 200, "Online"); });
   server->on( // Obrada OTA upload POST zahteva
       "/update", HTTP_POST, [](AsyncWebServerRequest *request) {},
       [](AsyncWebServerRequest *request, String filename, size_t index,
@@ -3463,7 +3516,7 @@ void setup()
       {
         if (!index)
         {
-          Serial.printf("Update begin: %s\n", filename.c_str());
+          LOG_INFO("Update begin: %s\n", filename.c_str());
           if (!Update.begin())
           {
             Update.printError(Serial);
@@ -3480,7 +3533,7 @@ void setup()
         {
           if (Update.end(true))
           {
-            Serial.printf("Update finished, size: %u\n", index + len);
+            LOG_INFO("Update finished, size: %u\n", index + len);
           }
           else
           {
@@ -3493,17 +3546,17 @@ void setup()
   // 1. Upload Firmware File to External Flash Slot
   server->on("/upload", HTTP_POST, [](AsyncWebServerRequest *request) {
     // Ovaj handler se izvršava NA KRAJU, nakon što je upload završen
-    Serial.println("Upload: Request Finished.");
+    LOG_INFO_LN("Upload: Request Finished.");
     
     // Provjeri parametre primljene u zahtjevu
     int params = request->params();
     for(int i=0;i<params;i++){
       AsyncWebParameter* p = request->getParam(i);
-      Serial.printf("Upload: Param[%s] = %s\n", p->name().c_str(), p->value().c_str());
+      LOG_DEBUG_F("Upload: Param[%s] = %s\n", p->name().c_str(), p->value().c_str());
     }
 
     if (!request->hasParam("slot", true) && !request->hasParam("slot")) { // Provjeri i POST i GET
-        Serial.println("Upload: ERROR - Missing 'slot' parameter");
+        LOG_ERROR_LN("Upload: ERROR - Missing 'slot' parameter");
         sendJsonError(request, 400, "Missing 'slot' parameter (0-7)");
         return;
     }
@@ -3513,7 +3566,7 @@ void setup()
     int slot = p->value().toInt();
     
     if (slot < 0 || slot >= FW_SLOT_COUNT) {
-        Serial.printf("Upload: ERROR - Invalid slot %d\n", slot);
+        LOG_ERROR("Upload: ERROR - Invalid slot %d\n", slot);
         sendJsonError(request, 400, "Invalid slot (0-7)");
         return;
     }
@@ -3530,7 +3583,7 @@ void setup()
     if (index == 0) {
         startTime = millis();
         uploadFilename = filename;
-        Serial.printf("Upload: START filename='%s'\n", filename.c_str());
+        LOG_INFO("Upload: START filename='%s'\n", filename.c_str());
         
         // Moramo ručno tražiti parametar jer request->getParam() možda nije spreman u ovom trenutku upload handlera
         // ESPAsyncWebServer parsira parametre dok stižu. 
@@ -3539,12 +3592,12 @@ void setup()
         
         if (request->hasParam("slot")) {
              uploadSlot = request->getParam("slot")->value().toInt();
-             Serial.printf("Upload: Slot detected in URL: %d\n", uploadSlot);
+             LOG_DEBUG_F("Upload: Slot detected in URL: %d\n", uploadSlot);
         } else {
              // Ako nije u URL, nadamo se da je stigao prije fajla u body-u (multipart)
              // Ovo je nepouzdano kod multiparta, ali pokušajmo
              // Za sada, ispišimo upozorenje korisniku da koristi URL parametar
-             Serial.println("Upload: WARNING - 'slot' not found in URL query. Checking body...");
+             LOG_INFO_LN("Upload: WARNING - 'slot' not found in URL query. Checking body...");
              // Defaultamo na -1 i čekamo kraj
              uploadSlot = -1; 
         }
@@ -3555,13 +3608,13 @@ void setup()
              AsyncWebParameter* p = request->getParam(i);
              if(p->name() == "slot") {
                  uploadSlot = p->value().toInt();
-                 Serial.printf("Upload: Slot found in multipart body: %d\n", uploadSlot);
+                 LOG_DEBUG_F("Upload: Slot found in multipart body: %d\n", uploadSlot);
              }
         }
 
         if (uploadSlot >= 0 && uploadSlot < FW_SLOT_COUNT) {
             if (uploadSlot < 4) { // Standard firmware slots
-                Serial.printf("Upload: Erasing Slot %d... (This may take time)\n", uploadSlot);
+                LOG_INFO("Upload: Erasing Slot %d... (This may take time)\n", uploadSlot);
                 extFlash.eraseSlot(uploadSlot);
                 
                 // VERIFY ERASE
@@ -3571,19 +3624,19 @@ void setup()
                 for(int k=0; k<16; k++) if(checkBuf[k] != 0xFF) erased = false;
                 
                 if(erased) {
-                    Serial.println("Upload: Erase VERIFIED (First 16 bytes are 0xFF). Writing...");
+                    LOG_INFO_LN("Upload: Erase VERIFIED (First 16 bytes are 0xFF). Writing...");
                 } else {
-                    Serial.printf("Upload: Erase FAILED! First byte: 0x%02X\n", checkBuf[0]);
+                    LOG_ERROR("Upload: Erase FAILED! First byte: 0x%02X\n", checkBuf[0]);
                 }
                 uploadOffset = 0;
             } else {
                 // Raw binary slots (4-7)
-                Serial.printf("Upload: Erasing Slot %d for raw binary... (This may take time)\n", uploadSlot);
+                LOG_INFO("Upload: Erasing Slot %d for raw binary... (This may take time)\n", uploadSlot);
                 extFlash.eraseSlot(uploadSlot); // Erase the whole slot first
                 uploadOffset = 0; // Reset offset, we will calculate it based on index for raw slots
             }
         } else {
-            Serial.println("Upload: ERROR - Invalid or Missing Slot at start of upload. Use /upload?slot=X");
+            LOG_ERROR_LN("Upload: ERROR - Invalid or Missing Slot at start of upload. Use /upload?slot=X");
         }
         
         uploadOffset = 0;
@@ -3597,23 +3650,23 @@ void setup()
             currentWriteOffset = RAW_SLOT_DATA_OFFSET + index;
         }
         if (!extFlash.writeBufferToSlot(uploadSlot, currentWriteOffset, data, len)) {
-             Serial.printf("Upload: WRITE ERROR at offset %u\n", uploadOffset);
+             LOG_ERROR("Upload: WRITE ERROR at offset %u\n", uploadOffset);
         }
         uploadOffset += len;
         
         // Log svakih 50KB da vidimo da je živo
         if ((uploadOffset % 51200) < len) {
-             Serial.printf("Upload: %u bytes written...\n", uploadOffset);
+             LOG_INFO("Upload: %u bytes written...\n", uploadOffset);
         }
     }
 
     if (final) {
         unsigned long duration = millis() - startTime;
         uint32_t finalSize = index + len;
-        Serial.printf("Upload: END. Total %u bytes in %lu ms. Slot used: %d\n", finalSize, duration, uploadSlot);
+        LOG_INFO("Upload: END. Total %u bytes in %lu ms. Slot used: %d\n", finalSize, duration, uploadSlot);
 
         if (uploadSlot == -1) {
-            Serial.println("Upload: FAILED - Slot was never identified.");
+            LOG_ERROR_LN("Upload: FAILED - Slot was never identified.");
             return;
         }
 
@@ -3622,13 +3675,13 @@ void setup()
             FwInfoTypeDef info;
             extFlash.getSlotInfo(uploadSlot, &info);
             if (info.size != finalSize) {
-                Serial.printf("Upload VALIDATION FAILED: File size mismatch! Header: %u, Actual: %u\n", info.size, finalSize);
+                LOG_ERROR("Upload VALIDATION FAILED: File size mismatch! Header: %u, Actual: %u\n", info.size, finalSize);
                 // Optionally, invalidate the slot here
             } else {
-                Serial.println("Upload VALIDATION PASSED: File size matches header.");
+                LOG_INFO_LN("Upload VALIDATION PASSED: File size matches header.");
             }
         } else { // Raw binary slots
-            Serial.println("Upload: Writing metadata for raw slot...");
+            LOG_INFO_LN("Upload: Writing metadata for raw slot...");
             RawSlotInfoTypeDef rawInfo;
             memset(&rawInfo, 0, sizeof(RawSlotInfoTypeDef));
 
@@ -3648,7 +3701,7 @@ void setup()
             rawInfo.valid = 1;
 
             extFlash.writeBufferToSlot(uploadSlot, RAW_SLOT_HEADER_OFFSET, (uint8_t*)&rawInfo, sizeof(RawSlotInfoTypeDef));
-            Serial.printf("Upload: Raw metadata written. CRC: 0x%08X\n", rawInfo.crc32);
+            LOG_INFO("Upload: Raw metadata written. CRC: 0x%08X\n", rawInfo.crc32);
         }
     }
   });
@@ -3805,13 +3858,23 @@ void setup()
   });
 
   server->begin();
-  Serial.println("Update server on http://" + WiFi.localIP().toString() + ":" + _port + "/update");
+  LOG_INFO_LN("Update server on http://%s:%d/update", WiFi.localIP().toString().c_str(), _port);
+  
+  // Inicijalizuj GET_STATUS watchdog na kraju setup-a
+  initGetStatusWatchdog();
 }
 /**
  * GLAVNA PETLJA
  */
 void loop()
 {
+  // Provera GET_STATUS watchdog-a (PRVO!)
+  if (getStatusWatchdogTriggered) {
+    LOG_ERROR("[Watchdog] No GET_STATUS for %d seconds. Restarting...\n", CMD_GET_STATUS_TIMEOUT_SEC);
+    delay(1000);
+    ESP.restart();
+  }
+  
   updateService.loop();
 
   unsigned long buttonPressStart = 0;
@@ -3847,7 +3910,7 @@ void loop()
       // čekaj dok je dugme i dalje pritisnuto
       if (millis() - buttonPressStart >= HOLD_TIME)
       {
-        Serial.println("BOOT taster hold for 5s, starting portal...");
+        LOG_INFO_LN("BOOT taster hold for 5s, starting portal...");
         wm.resetSettings();    // obriši stare podatke
         WiFi.disconnect(true); // prekini vezu i zaboravi sve
         delay(1000);
@@ -3863,7 +3926,7 @@ void loop()
     wifiCheckTimer = millis();
     if (WiFi.status() != WL_CONNECTED)
     {
-      Serial.println("WiFi not connected, Restart...");
+      LOG_ERROR_LN("WiFi not connected, Restart...");
       delay(2000);
       ESP.restart();
     }
@@ -3878,15 +3941,15 @@ void loop()
       if (pingGoogle())
       {
         pingFailures = 0;
-        Serial.println("[PingWdg] Google Response OK...");
+        LOG_INFO_LN("[PingWdg] Google Response OK...");
       }
       else
       {
         pingFailures++;
-        Serial.printf("[PingWdg] Ping failed (%d/%d)\n", pingFailures, MAX_PING_FAILURES);
+        LOG_ERROR("[PingWdg] Ping failed (%d/%d)\n", pingFailures, MAX_PING_FAILURES);
         if (pingFailures >= MAX_PING_FAILURES)
         {
-          Serial.println("[PingWdg] Max failures reached. Restarting...");
+          LOG_ERROR_LN("[PingWdg] Max failures reached. Restarting...");
           ESP.restart();
         }
       }
@@ -3916,14 +3979,14 @@ void loop()
         tempSensorAvailable = false;
         turnOffThermoRelays();
         th_mode = TH_OFF; // sigurnosno
-        Serial.println("Temperature sensor disconnected!");
+        LOG_ERROR_LN("Temperature sensor disconnected!");
       }
       else
       {
         // senzor validan → obradi podatak
         emaTemperature = (emaAlpha * temp) + ((1 - emaAlpha) * emaTemperature);
         setFansAndValve(emaTemperature);
-        Serial.printf("Room Temperature: %.2f C (EMA: %.2f)\n", temp, emaTemperature);
+        LOG_DEBUG_F("Room Temperature: %.2f C (EMA: %.2f)\n", temp, emaTemperature);
       }
     }
     else
@@ -3931,7 +3994,7 @@ void loop()
       // pokušaj ponovo otkriti senzor
       if (sensors.getDeviceCount() > 0)
       {
-        Serial.println("Room Temperature Sensor reconnected!");
+        LOG_INFO_LN("Room Temperature Sensor reconnected!");
         tempSensorAvailable = true;
 
         // inicijalna EMA (da ne skoči naglo)
@@ -3943,11 +4006,11 @@ void loop()
           emaTemperature = temp;
           loadThermoPreferences(); // vrati postavke i režim
           th_mode = th_saved_mode;
-          Serial.printf("Room Temperature: %.2f C | Settings restored | Mode: %d\n", temp, (int)th_mode);
+          LOG_INFO("Room Temperature: %.2f C | Settings restored | Mode: %d\n", temp, (int)th_mode);
         }
         else
         {
-          Serial.println("Sensor reconnected, but not responding!");
+          LOG_ERROR_LN("Sensor reconnected, but not responding!");
         }
       }
       else
@@ -3962,7 +4025,7 @@ void loop()
     {
       sensors2.requestTemperatures();
       fluid = sensors2.getTempCByIndex(0);
-      Serial.print("Fluid Temperature: " + String(fluid) + "*C\n");
+      LOG_DEBUG_F("Fluid Temperature: %.2f*C\n", fluid);
     }
   }
 }

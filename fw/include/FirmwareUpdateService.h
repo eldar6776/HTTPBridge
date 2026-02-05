@@ -25,10 +25,12 @@ extern "C" {
 #define SUB_CMD_FINISH_NACK      0x22
 
 // Parameters
-#define MAX_UPDATE_RETRIES       20
+#define MAX_UPDATE_RETRIES       5
 #define DATA_CHUNK_SIZE          128 // Max payload per packet
 #define RESPONSE_TIMEOUT_MS      2000
 #define FLASH_WRITE_TIMEOUT_MS   10000 // Erase/Write can take time
+#define TERMINAL_STATE_RETENTION_MS  60000 // 60s retention nakon završetka (6× frontend polling)
+#define NO_PROGRESS_TIMEOUT_MS   30000 // 30s timeout ako nema progresa
 
 enum UpdateState {
     UPD_IDLE,
@@ -61,6 +63,8 @@ public:
     uint8_t getProgress() { return _progress; } // 0-100
     UpdateState getState() { return _state; }
     const char* getLastError() { return _lastError; }
+    bool wasCompleted() { return _wasCompleted; } // Da li je ikada završen update
+    UpdateState getLastCompletionState() { return _lastTerminalState; } // Poslednji terminal state
 
 private:
     ExternalFlash& _flash;
@@ -81,6 +85,10 @@ private:
     unsigned long _timerStart;
     uint8_t _retryCount;
     uint8_t _progress;
+    uint8_t _lastProgress; // Za detekciju no-progress
+    unsigned long _lastProgressTime; // Vreme kada se progress promenio
+    bool _wasCompleted; // Da li je update završen
+    UpdateState _lastTerminalState; // Poslednji SUCCESS/FAILED state
 
     uint8_t _chunkBuffer[DATA_CHUNK_SIZE + 10]; // Buffer for reading + header
 

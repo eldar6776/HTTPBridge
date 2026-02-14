@@ -1295,6 +1295,7 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
 
   uint8_t buf[64] = {0};
   int length = 0;
+  bool isLocalCommand = false;  // Flag: true za komande koje se obrađuju lokalno (bez RS485)
   led_state = LED_FAST;
 
   switch (cmd)
@@ -1303,6 +1304,7 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
   case CMD_RESTART:
   {
     LOG_INFO_LN("Device restart...");
+    isLocalCommand = true;  // ✅ Lokalna komanda
     sendJsonSuccess(request, "Restart in 3s");
     delay(3000);
     ESP.restart();
@@ -1366,6 +1368,7 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
   }
   case CMD_GET_MDNS_NAME:
   {
+    isLocalCommand = true;  // ✅ Lokalna komanda
 
     preferences.begin("_mdns", false);
     preferences.getString("mdns", _mdns, sizeof(_mdns));
@@ -2160,6 +2163,8 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
     // Reset watchdog timer - dobili smo GET_STATUS komandu
     resetGetStatusWatchdog();
     
+    isLocalCommand = true;  // ✅ Lokalna komanda, bez RS485
+    
     time_t now;
     time(&now);
     struct tm utc_tm = *gmtime(&now);
@@ -2619,9 +2624,21 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
           return;
       }
 
-      // 2. Podesi parametre na IRac objektu
+      // 2. Proveri da li je protokol podržan za AC
+      if (!ac.isProtocolSupported((decode_type_t)protoID)) {
+          LOG_ERROR("Protocol ID=%d (%s) NOT supported for AC!\n", 
+                    protoID, typeToString((decode_type_t)protoID).c_str());
+          sendJsonError(request, 400, "Protocol not supported. Use AC protocol: COOLIX, DAIKIN, MIDEA, GREE, etc.");
+          return;
+      }
+
+      LOG_INFO("IR CMD: protocol=%d (%s) mode=%s temp=%d\n", 
+               protoID, typeToString((decode_type_t)protoID).c_str(), modeStr.c_str(), temp);
+
+      // 3. Podesi parametre na IRac objektu
       ac.next.protocol = (decode_type_t)protoID;
-      ac.next.fanspeed = stdAc::fanspeed_t::kAuto; // Uvijek AUTO kako si tražio
+      ac.next.model = 1;
+      ac.next.fanspeed = stdAc::fanspeed_t::kAuto;
       ac.next.celsius = true;
 
       if (modeStr == "OFF") {
@@ -2639,8 +2656,14 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
           return;
       }
 
-      // 3. Pošalji signal
-      ac.sendAc();
+      // 4. Pošalji signal
+      LOG_INFO("IR Sending on pin %d...\n", IR_PIN);
+      bool result = ac.sendAc();
+      LOG_INFO("IR Send result: %s\n", result ? "OK" : "FAIL");
+      
+      if (!result) {
+          LOG_ERROR("Failed to send IR signal!\n");
+      }
 
       JsonDocument data;
       data["protocol"] = typeToString(ac.next.protocol);
@@ -2684,10 +2707,21 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
     break;
   }
   default:
+    isLocalCommand = false;
     sendJsonError(request, 400, "Unknown command");
     return;
   }
 
+  // ===== RUTA: Odredite da li je ovo lokalna komanda (ESP32) ili remote (RS485) =====
+  if (isLocalCommand)
+  {
+    // Sve lokalne komande koje koriste return ili break su već obrađene
+    // Ova sekcija je samo kao fallback ako se greška dogodi
+    LOG_INFO_LN("[handleSysctrlRequest] Local command completed");
+    return;
+  }
+
+  // ===== RUTA: Remote komande koje trebali RS485 bus =====
   if (buf[0] && length)
   {
     LOG_DEBUG("Sending command: ");
@@ -2741,6 +2775,11 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
       
       --rdy;
       delay(1);
+      
+      // Resetuj WDT tokom dugog čekanja na odgovor
+      if (rdy % 10 == 0) {
+        esp_task_wdt_reset();
+      }
     } while (rdy > 0);
     
     // Deblokiraj loop()
@@ -2751,6 +2790,18 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
     if (rdy == 0)
     {
       LOG_ERROR_LN(">>> TIMEOUT detected!");
+      
+      // Očisti zaglavljen buffer
+      httpHandlerWaiting = false;
+      while (Serial2.available()) {
+        Serial2.read();
+      }
+      Serial2.flush();
+      
+      // Loguj upozorenje o mogućem Command buffer error-u
+      LOG_ERROR_LN("[WARNING] Timeout may have left TinyFrame in inconsistent state");
+      LOG_ERROR_LN("[WARNING] If Command buffer error occurs on next request, device will auto-restart");
+      
       sendJsonError(request, 408, "Timeout: No response from device");
     }
     else
@@ -3210,7 +3261,38 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
   }
   else
   {
-    sendJsonError(request, 500, "Command buffer error");
+    // KRITIČNA GREŠKA - Komunikacija je zaglavljena
+    LOG_ERROR_LN("==========================================");
+    LOG_ERROR_LN("[CRITICAL] Command buffer error detected!");
+    LOG_ERROR_LN("[CRITICAL] RS485/TinyFrame communication is stuck!");
+    LOG_ERROR_LN("[CRITICAL] Device will restart in 2 seconds...");
+    LOG_ERROR_LN("==========================================" );
+    
+    // Loguj debug info
+    LOG_ERROR("[DEBUG] buf[0]=0x%02X, length=%d, isLocalCommand=%d\n", 
+                buf[0], length, isLocalCommand);
+    
+    sendJsonError(request, 500, "Command buffer error - device restarting");
+    
+    // Resetuj WDT prije restarty
+    esp_task_wdt_reset();
+    
+    // Čekaj malo da klijent primi odgovor
+    delay(500);
+    
+    // Reinicijalizuj prije ponovnog pokušaja
+    LOG_INFO_LN(">>> Attempting TinyFrame/Serial2 reinitialization...");
+    
+    // Očisti Serial2 buffer
+    while (Serial2.available()) {
+      Serial2.read();
+    }
+    Serial2.flush();
+    
+    // Restart kompletnog sistema
+    LOG_ERROR_LN(">>> Performing hard reset of device");
+    delay(1000);
+    ESP.restart();
   }
 }
 /**

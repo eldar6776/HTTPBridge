@@ -12,7 +12,7 @@
 // 2. Ovdje postavljate željeni nivo za cijeli projekt
 // Može se mijenjati ručno ovdje ili preko build flagova
 #ifndef CURRENT_LOG_LEVEL
-#define CURRENT_LOG_LEVEL LOG_LEVEL_DEBUG
+#define CURRENT_LOG_LEVEL LOG_LEVEL_ERROR
 #endif
 
 // 3. Makro definicije

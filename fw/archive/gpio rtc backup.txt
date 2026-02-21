@@ -1,0 +1,60 @@
+PROMPT ZA KODING AGENTA:
+
+Kontekst:
+Radimo na C++ kodu za ESP32 (Arduino core / ESP-IDF arhitektura). Imamo problem sa kratkim prekidima signala (glitch) na izlaznim relejima tokom softverskog restarta ili Watchdog (WDT) restarta mikrokontrolera. Potrebno je osigurati hardversko zadržavanje stanja (Persistent Hold) tokom restarta za tačno 5 kritičnih RTC GPIO pinova:
+
+LIGHT_PIN (GPIO 32)
+
+VALVE (GPIO 33)
+
+FAN_L (GPIO 25)
+
+FAN_M (GPIO 26)
+
+FAN_H (GPIO 27)
+
+Zvanični izvor metoda koje treba koristiti je Espressif ESP-IDF dokumentacija za driver/rtc_io.h i esp_system.h (Reset Reason API).
+
+Tvoj zadatak:
+Potrebno je modifikovati postojeći .cpp fajl prateći striktno sljedeće korake:
+
+Uključivanje potrebnih zaglavlja: Na sam vrh fajla (odmah ispod postojećih #include direktiva) dodaj:
+#include <driver/rtc_io.h>
+
+Kreiranje wrapper funkcije za glitch-free tranziciju: Iznad funkcije setup(), kreiraj novu funkciju pod nazivom setPinWithHold(int pin, int level). Funkcija mora izvršiti komande strogo ovim redoslijedom kako bi spriječila gubitak nivoa signala:
+
+gpio_hold_dis((gpio_num_t)pin);
+
+digitalWrite(pin, level);
+
+gpio_hold_en((gpio_num_t)pin);
+
+Modifikacija setup() funkcije:
+
+Inicijaliziraj smjer sva 5 navedena pina kao OUTPUT sa pinMode().
+
+Koristi esp_reset_reason_t reason = esp_reset_reason(); da utvrdiš tip boota.
+
+Ako je reason jednak ESP_RST_SW, ESP_RST_WDT ili ESP_RST_TASK_WDT (Warm boot), ne smiješ pozivati digitalWrite niti setPinWithHold za ovih 5 pinova. Stanja moraju ostati netaknuta.
+
+Ako je u pitanju bilo koji drugi razlog (Cold boot / Power on), postavi sva 5 pina na LOW pozivom funkcije setPinWithHold(pin, LOW).
+
+Globalna zamjena kontrolnih funkcija: U cijelom kodu pažljivo pronađi sve lokacije gdje se koristi digitalWrite() isključivo za pinove LIGHT_PIN, VALVE, FAN_L, FAN_M i FAN_H. Zamijeni te pozive sa novom funkcijom setPinWithHold(pin, level). Fokusiraj se posebno na tijela funkcija:
+
+setOutdoorLightOverride
+
+updateLightState
+
+setFansAndValve
+
+turnOffThermoRelays
+
+Tehnička ograničenja (STRIKTNO):
+
+Prikazuj kod isključivo u standardnom Markdown code formatu. Zabrana je korištenja Canvas funkcije za prikaz koda.
+
+Ne mijenjaj logiku termostata ni tajmera.
+
+Za pinove koji nisu navedeni u ovom zahtjevu (npr. LED_PIN, RS485_DE_PIN) ostavi standardni digitalWrite.
+
+Obezbijedi kompletan i tačan C++ sintaksni format.

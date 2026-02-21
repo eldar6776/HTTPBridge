@@ -18,10 +18,18 @@
 #include "ExternalFlash.h"
 #include "FirmwareUpdateService.h"
 #include "LogMacros.h"
+#include <driver/rtc_io.h>
 
 extern "C"
 {
 #include "TinyFrame.h"
+}
+
+// Wrapper funkcija za glitch-free tranziciju (Persistent Hold)
+void setPinWithHold(int pin, int level) {
+    gpio_hold_dis((gpio_num_t)pin);
+    digitalWrite(pin, level);
+    gpio_hold_en((gpio_num_t)pin);
 }
 
 // Helper function for standard CRC32 calculation
@@ -110,6 +118,8 @@ int _port = 80;
 bool timeValid = false;
 bool overrideActive = false;
 bool overrideState = false;
+bool lightRestorePending = false; // Warm boot: čekaj validno vrijeme prije upravljanja LIGHT_PIN
+unsigned long lightRestoreTimeout = 0; // Vrijeme kad je restore aktiviran (za timeout fallback)
 bool lastTimerState = false;  // Prethodno stanje timera (za detekciju promene)
 int rdy, replyDataLength;
 volatile bool httpHandlerWaiting = false;  // Flag za blokiranje loop() čitanja
@@ -158,6 +168,8 @@ void initGetStatusWatchdog() {
 float fluid = 0.0;          // Fluid temperature
 float emaTemperature = 0.0; // EMA filter
 float emaAlpha = 0.2;       // podesiv u prefs
+bool emaInitialized = false; // Prvo validno očitanje potpuno inicijalizuje EMA
+bool thermostatRestorePending = false; // Warm boot: čekaj prvo validno očitanje prije pune regulacije
 float th_setpoint = 25.0;   // Termostat varijable
 float th_treshold = 0.5;    // osnovni prag
 int currentFanLevel = 0;    // Globalna varijabla, čuva trenutno aktivnu brzinu: 0 = off, 1 = L, 2 = M, 3 = H
@@ -769,9 +781,9 @@ void setThermoFanLevel(int newLevel)
     return; // nema promjene
 
   // Isključi sve releje
-  digitalWrite(FAN_L, LOW);
-  digitalWrite(FAN_M, LOW);
-  digitalWrite(FAN_H, LOW);
+  setPinWithHold(FAN_L, LOW);
+  setPinWithHold(FAN_M, LOW);
+  setPinWithHold(FAN_H, LOW);
 
   delay(200); // mala pauza radi sigurnosti pre nego se uključi novi relej
 
@@ -779,13 +791,13 @@ void setThermoFanLevel(int newLevel)
   switch (newLevel)
   {
   case 1:
-    digitalWrite(FAN_L, HIGH);
+    setPinWithHold(FAN_L, HIGH);
     break;
   case 2:
-    digitalWrite(FAN_M, HIGH);
+    setPinWithHold(FAN_M, HIGH);
     break;
   case 3:
-    digitalWrite(FAN_H, HIGH);
+    setPinWithHold(FAN_H, HIGH);
     break;
   }
 
@@ -799,7 +811,8 @@ void setFansAndValve(float temp)
   if (!tempSensorAvailable || th_mode == TH_OFF)
   {
     setThermoFanLevel(0);
-    digitalWrite(VALVE, LOW);
+    setPinWithHold(VALVE, LOW);
+    thermostatRestorePending = false;
     return;
   }
 
@@ -863,17 +876,50 @@ void setFansAndValve(float temp)
         setThermoFanLevel(2);
     }
   }
-  digitalWrite(VALVE, currentFanLevel > 0 ? HIGH : LOW);
+  setPinWithHold(VALVE, currentFanLevel > 0 ? HIGH : LOW);
 }
 /**
  * ISKLJUČI SVE IZLAZE TERMOSTATA
  */
 void turnOffThermoRelays()
 {
-  digitalWrite(FAN_L, LOW);
-  digitalWrite(FAN_M, LOW);
-  digitalWrite(FAN_H, LOW);
-  digitalWrite(VALVE, LOW);
+  setPinWithHold(FAN_L, LOW);
+  setPinWithHold(FAN_M, LOW);
+  setPinWithHold(FAN_H, LOW);
+  setPinWithHold(VALVE, LOW);
+  currentFanLevel = 0;
+}
+
+int detectFanLevelFromPins()
+{
+  bool fanLOn = (digitalRead(FAN_L) == HIGH);
+  bool fanMOn = (digitalRead(FAN_M) == HIGH);
+  bool fanHOn = (digitalRead(FAN_H) == HIGH);
+
+  if (fanHOn)
+    return 3;
+  if (fanMOn)
+    return 2;
+  if (fanLOn)
+    return 1;
+  return 0;
+}
+
+void restoreThermostatStateFromPins()
+{
+  currentFanLevel = detectFanLevelFromPins();
+  bool valveOn = (digitalRead(VALVE) == HIGH);
+
+  LOG_INFO("[Thermostat Restore] FAN level=%d, VALVE=%s\n",
+           currentFanLevel,
+           valveOn ? "ON" : "OFF");
+
+  if (!valveOn && currentFanLevel > 0)
+  {
+    LOG_ERROR_LN("[Thermostat Restore] Inconsistent state: FAN active while VALVE is OFF.");
+  }
+
+  thermostatRestorePending = true;
 }
 /**
  * UČITAJ IZ MEMORIJE POSTAVKE TERMOSTATA
@@ -886,7 +932,8 @@ void loadThermoPreferences()
   th_mode = (ThMode)preferences.getInt("mode", 0);
   th_saved_mode = (ThMode)preferences.getInt("th_saved_mode", 0);
   emaAlpha = preferences.getFloat("emaAlpha", 0.2);
-  emaTemperature = th_setpoint; // start EMA blizu setpointa
+  emaTemperature = th_setpoint; // fallback prije prvog validnog očitanja
+  emaInitialized = false;
   preferences.end();
 }
 /**
@@ -1059,7 +1106,7 @@ void setOutdoorLightOverride(bool state)
 {
   overrideActive = true;
   overrideState = state;
-  digitalWrite(LIGHT_PIN, state ? HIGH : LOW);
+  setPinWithHold(LIGHT_PIN, state ? HIGH : LOW);
   lightState = state;
 }
 /**
@@ -1176,7 +1223,18 @@ bool isDST(int year, int month, int day, int hour)
 void updateLightState()
 {
   if (timeValid == false)
+  {
+    // Vrijeme nije validno, ne diraj pin
     return;
+  }
+
+  // Ako je bilo pending restore, resetuj ga jer sada imamo validno vrijeme
+  if (lightRestorePending)
+  {
+    lightRestorePending = false;
+    lightRestoreTimeout = 0;
+    LOG_INFO_LN("[Light Restore] Time valid. Continuing from preserved pin state.");
+  }
 
   time_t now;
   time(&now);
@@ -1247,7 +1305,7 @@ void updateLightState()
                lastTimerState ? "ON" : "OFF", lightShouldBeOn ? "ON" : "OFF");
       clearOutdoorLightOverride(); // Resetuj override i pusti timer da preuzme
       lastTimerState = lightShouldBeOn;
-      digitalWrite(LIGHT_PIN, lightShouldBeOn ? HIGH : LOW);
+      setPinWithHold(LIGHT_PIN, lightShouldBeOn ? HIGH : LOW);
       lightState = lightShouldBeOn;
     }
     else
@@ -1262,7 +1320,7 @@ void updateLightState()
   {  
     // Nema override-a, primeni timer stanje
     lastTimerState = lightShouldBeOn;
-    digitalWrite(LIGHT_PIN, lightShouldBeOn ? HIGH : LOW);
+    setPinWithHold(LIGHT_PIN, lightShouldBeOn ? HIGH : LOW);
     lightState = lightShouldBeOn;
   }
 
@@ -3453,6 +3511,32 @@ void setup()
   Serial.begin(115200);
   Serial2.begin(115200);
 
+  // Inicijalizacija RTC Persistent Pinova (PRIORITETNO)
+  pinMode(LIGHT_PIN, OUTPUT);
+  pinMode(FAN_L, OUTPUT);
+  pinMode(FAN_M, OUTPUT);
+  pinMode(FAN_H, OUTPUT);
+  pinMode(VALVE, OUTPUT);
+
+  // Provjera razloga restarta (RTC GPIO Backup)
+  esp_reset_reason_t reason = esp_reset_reason();
+  bool warmBoot = (reason == ESP_RST_SW || reason == ESP_RST_WDT || reason == ESP_RST_TASK_WDT);
+  thermostatRestorePending = false;
+
+  if (!warmBoot) {
+    // Cold boot -> Inicijalizuj na LOW
+    setPinWithHold(LIGHT_PIN, LOW);
+    setPinWithHold(FAN_L, LOW);
+    setPinWithHold(FAN_M, LOW);
+    setPinWithHold(FAN_H, LOW);
+    setPinWithHold(VALVE, LOW);
+    currentFanLevel = 0;
+  } else {
+    // Warm boot -> Zadrži prethodno stanje (ne diraj pinove)
+    LOG_INFO_LN("[RTC Backup] Warm boot detected. Preserving pin states.");
+    restoreThermostatStateFromPins();
+  }
+
   // Init VSPI for External Flash
   LOG_INFO_LN("\n\n=== Initializing SPI Flash ===");
   LOG_INFO("CS Pin: %d, SCK: %d, MISO: %d, MOSI: %d\n", FLASH_CS, FLASH_SCK, FLASH_MISO, FLASH_MOSI);
@@ -3469,18 +3553,9 @@ void setup()
   pinMode(BOOT_PIN, INPUT_PULLUP);
   pinMode(RS485_DE_PIN, OUTPUT);
   digitalWrite(RS485_DE_PIN, LOW);
-  pinMode(LIGHT_PIN, OUTPUT);
-  digitalWrite(LIGHT_PIN, LOW);
+
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
-  pinMode(FAN_L, OUTPUT);
-  digitalWrite(FAN_L, LOW);
-  pinMode(FAN_M, OUTPUT);
-  digitalWrite(FAN_M, LOW);
-  pinMode(FAN_H, OUTPUT);
-  digitalWrite(FAN_H, LOW);
-  pinMode(VALVE, OUTPUT);
-  digitalWrite(VALVE, LOW);
 
   // IR Transmitter Init
   pinMode(IR_PIN, OUTPUT);
@@ -3506,15 +3581,18 @@ void setup()
   if (tempSensorAvailable)
   {
     loadThermoPreferences();
-    th_mode = th_saved_mode;
     sensors.setResolution(12);
     sensors.requestTemperatures();
+    lastReadTime = millis() - READ_INTERVAL; // Forsiraj prvo čitanje odmah nakon restarta
   }
   else
   {
     LOG_ERROR_LN("Room Temperature sensor NOT found!");
-    turnOffThermoRelays(); // sigurnosno
+    if (!warmBoot) {
+      turnOffThermoRelays(); // sigurnosno samo na cold boot
+    }
     th_mode = TH_OFF;      // i postavi mod u OFF
+    thermostatRestorePending = false; // Nema senzora -> nema pending restore
   }
 
   sensors2.begin();
@@ -3584,7 +3662,21 @@ void setup()
 
   loadTimerPreferences();
   setupLightControl();
-  updateLightState();
+  if (!warmBoot) {
+    updateLightState();
+  } else {
+    // Warm boot: sačekaj validno vrijeme prije nego što updateLightState() upravlja pinom
+    if (timeValid) {
+      // Vrijeme je već validno, odmah pozovi updateLightState da resetuje pending
+      LOG_INFO_LN("[Light Restore] Warm boot with valid time. Applying light control.");
+      updateLightState();
+    } else {
+      // Vrijeme još nije validno, aktiviraj pending sa timeout-om
+      lightRestorePending = true;
+      lightRestoreTimeout = millis();
+      LOG_INFO_LN("[Light Restore] Warm boot - waiting for valid time before managing LIGHT_PIN.");
+    }
+  }
 
   server->on("/sysctrl.cgi", HTTP_GET, handleSysctrlRequest);  // Handler za sysctrl.cgi
   server->on("/", HTTP_GET, [](AsyncWebServerRequest *request) // Osnovni endpoint root
@@ -4047,6 +4139,16 @@ void loop()
     }
   }
 
+  // Light restore timeout: ako nakon 30s vrijeme još nije validno, idi u OFF stanje
+  if (lightRestorePending && (millis() - lightRestoreTimeout > 30000))
+  {
+    LOG_ERROR_LN("[Light Restore] Timeout: Time not valid after 30s. Setting LIGHT_PIN to OFF.");
+    setPinWithHold(LIGHT_PIN, LOW);
+    lightState = false;
+    lightRestorePending = false;
+    lightRestoreTimeout = 0;
+  }
+
   if (tick - lastReadTime >= (tempSensorAvailable ? READ_INTERVAL : READ_INTERVAL * 10)) // provjera senzora temperature i update termostata
   {
     lastReadTime = tick;
@@ -4059,14 +4161,30 @@ void loop()
       if (temp == DEVICE_DISCONNECTED_C)
       {
         tempSensorAvailable = false;
+        emaInitialized = false;
+        thermostatRestorePending = false; // Sensor fail -> clear pending restore
         turnOffThermoRelays();
         th_mode = TH_OFF; // sigurnosno
         LOG_ERROR_LN("Temperature sensor disconnected!");
       }
       else
       {
-        // senzor validan → obradi podatak
-        emaTemperature = (emaAlpha * temp) + ((1 - emaAlpha) * emaTemperature);
+        if (!emaInitialized)
+        {
+          emaTemperature = temp;
+          emaInitialized = true;
+          LOG_INFO("EMA initialized from first reading: %.2f C\n", emaTemperature);
+
+          if (thermostatRestorePending)
+          {
+            thermostatRestorePending = false;
+            LOG_INFO_LN("[Thermostat Restore] First valid reading received. Continuing from restored relay state.");
+          }
+        }
+        else
+        {
+          emaTemperature = (emaAlpha * temp) + ((1 - emaAlpha) * emaTemperature);
+        }
         setFansAndValve(emaTemperature);
         LOG_DEBUG_F("Room Temperature: %.2f C (EMA: %.2f)\n", temp, emaTemperature);
       }
@@ -4085,9 +4203,11 @@ void loop()
         float temp = sensors.getTempCByIndex(0);
         if (temp != DEVICE_DISCONNECTED_C)
         {
-          emaTemperature = temp;
           loadThermoPreferences(); // vrati postavke i režim
-          th_mode = th_saved_mode;
+          emaTemperature = temp;
+          emaInitialized = true;
+          thermostatRestorePending = false;
+          setFansAndValve(emaTemperature);
           LOG_INFO("Room Temperature: %.2f C | Settings restored | Mode: %d\n", temp, (int)th_mode);
         }
         else

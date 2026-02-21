@@ -773,7 +773,7 @@ void setThermoFanLevel(int newLevel)
   digitalWrite(FAN_M, LOW);
   digitalWrite(FAN_H, LOW);
 
-  delay(100); // mala pauza radi sigurnosti pre nego se uključi novi relej
+  delay(200); // mala pauza radi sigurnosti pre nego se uključi novi relej
 
   // Uključi samo novi relej ako je traženi nivo > 0
   switch (newLevel)

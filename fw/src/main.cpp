@@ -25,29 +25,7 @@ extern "C"
 #include "TinyFrame.h"
 }
 
-// Wrapper funkcija za glitch-free tranziciju (Persistent Hold)
-void setPinWithHold(int pin, int level) {
-    gpio_hold_dis((gpio_num_t)pin);
-    digitalWrite(pin, level);
-    gpio_hold_en((gpio_num_t)pin);
-}
 
-// Helper function for standard CRC32 calculation
-uint32_t crc32_update(uint32_t crc, const uint8_t *data, size_t len) {
-    crc = ~crc;
-    while (len--) {
-        crc ^= *data++;
-        for (int k = 0; k < 8; k++) {
-            crc = crc & 1 ? (crc >> 1) ^ 0xedb88320 : crc >> 1;
-        }
-    }
-    return ~crc;
-}
-
-extern "C"
-{
-#include "TinyFrame.h"
-}
 
 #include "version.h"
 
@@ -123,6 +101,9 @@ unsigned long lightRestoreTimeout = 0; // Vrijeme kad je restore aktiviran (za t
 bool lastTimerState = false;  // Prethodno stanje timera (za detekciju promene)
 int rdy, replyDataLength;
 volatile bool httpHandlerWaiting = false;  // Flag za blokiranje loop() čitanja
+volatile bool otaUpdateInProgress = false;
+volatile bool otaUpdateReadyToReboot = false;
+unsigned long otaRebootAtMs = 0;
 bool pingWatchdogEnabled = false;
 unsigned long lastPingTime = 0;
 int pingFailures = 0;
@@ -132,6 +113,25 @@ unsigned long lastReadTime = 0;
 #define CMD_GET_STATUS_TIMEOUT_SEC 600 // 10 minuta u sekundama
 hw_timer_t *getStatusWatchdog = NULL;
 volatile bool getStatusWatchdogTriggered = false;
+
+// Wrapper funkcija za glitch-free tranziciju (Persistent Hold)
+void setPinWithHold(int pin, int level) {
+    gpio_hold_dis((gpio_num_t)pin);
+    digitalWrite(pin, level);
+    gpio_hold_en((gpio_num_t)pin);
+}
+
+// Helper function for standard CRC32 calculation
+uint32_t crc32_update(uint32_t crc, const uint8_t *data, size_t len) {
+    crc = ~crc;
+    while (len--) {
+        crc ^= *data++;
+        for (int k = 0; k < 8; k++) {
+            crc = crc & 1 ? (crc >> 1) ^ 0xedb88320 : crc >> 1;
+        }
+    }
+    return ~crc;
+}
 
 // Timer callback - poziva se kada istekne 10 minuta bez GET_STATUS
 void IRAM_ATTR onGetStatusTimeout() {
@@ -1339,6 +1339,12 @@ void setupLightControl()
  */
 void handleSysctrlRequest(AsyncWebServerRequest *request)
 {
+  if (otaUpdateInProgress)
+  {
+    sendJsonError(request, 503, "OTA update in progress");
+    return;
+  }
+
   String bin = "";
   String body = "";  // Dodano za kompatibilnost sa CMD_READ_LOG koji još nije konvertovan
 
@@ -2553,7 +2559,9 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
   }
   case CMD_TH_OFF:
   {
-    th_saved_mode = th_mode;
+    if (th_mode == TH_HEATING || th_mode == TH_COOLING) {
+      th_saved_mode = th_mode;
+    }
     th_mode = TH_OFF;
     turnOffThermoRelays();
     preferences.begin("thermo", false);
@@ -2571,14 +2579,23 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
     if (th_mode == TH_OFF)
     {
       preferences.begin("thermo", false);
-      th_saved_mode = (ThMode)preferences.getInt("th_saved_mode", TH_HEATING); // ili TH_OFF kao default
+      th_saved_mode = (ThMode)preferences.getInt("th_saved_mode", TH_HEATING);
       preferences.end();
 
+      if (th_saved_mode != TH_HEATING && th_saved_mode != TH_COOLING) {
+        th_saved_mode = TH_HEATING;
+      }
+
       th_mode = th_saved_mode;
+
+      preferences.begin("thermo", false);
+      preferences.putInt("mode", (int)th_mode);
+      preferences.putInt("th_saved_mode", (int)th_saved_mode);
+      preferences.end();
     }
     
     JsonDocument data;
-    data["mode"] = th_mode == TH_HEATING ? "HEATING" : "COOLING";
+    data["mode"] = th_mode == TH_HEATING ? "HEATING" : th_mode == TH_COOLING ? "COOLING" : "OFF";
     sendJsonSuccess(request, "Thermostat resumed", &data);
     return;
   }
@@ -3377,6 +3394,9 @@ uint8_t toBCD(uint8_t val)
  */
 void sendRtcToBus()
 {
+  if (otaUpdateInProgress)
+    return;
+
   if (timeValid == false)
     return;
 
@@ -3684,15 +3704,31 @@ void setup()
   server->on("/update", HTTP_GET, [](AsyncWebServerRequest *request) // /update GET vraća isto kao root (bez forme)
              { sendJsonError(request, 200, "Online"); });
   server->on( // Obrada OTA upload POST zahteva
-      "/update", HTTP_POST, [](AsyncWebServerRequest *request) {},
+      "/update", HTTP_POST, [](AsyncWebServerRequest *request) {
+        if (Update.hasError())
+        {
+          otaUpdateInProgress = false;
+          otaUpdateReadyToReboot = false;
+          sendJsonError(request, 500, "OTA update failed");
+          return;
+        }
+
+        otaUpdateInProgress = false;
+        otaUpdateReadyToReboot = true;
+        otaRebootAtMs = millis() + 1500;
+        sendJsonSuccess(request, "OTA update complete, rebooting");
+      },
       [](AsyncWebServerRequest *request, String filename, size_t index,
          uint8_t *data, size_t len, bool final)
       {
         if (!index)
         {
+          otaUpdateInProgress = true;
+          otaUpdateReadyToReboot = false;
           LOG_INFO("Update begin: %s\n", filename.c_str());
           if (!Update.begin())
           {
+            otaUpdateInProgress = false;
             Update.printError(Serial);
           }
         }
@@ -3700,6 +3736,7 @@ void setup()
         {
           if (Update.write(data, len) != len)
           {
+            otaUpdateInProgress = false;
             Update.printError(Serial);
           }
         }
@@ -3711,6 +3748,7 @@ void setup()
           }
           else
           {
+            otaUpdateInProgress = false;
             Update.printError(Serial);
           }
         }
@@ -4042,6 +4080,13 @@ void setup()
  */
 void loop()
 {
+  if (otaUpdateReadyToReboot && millis() >= otaRebootAtMs)
+  {
+    LOG_INFO_LN("OTA reboot...");
+    delay(200);
+    ESP.restart();
+  }
+
   // Provera GET_STATUS watchdog-a (PRVO!)
   if (getStatusWatchdogTriggered) {
     LOG_ERROR("[Watchdog] No GET_STATUS for %d seconds. Restarting...\n", CMD_GET_STATUS_TIMEOUT_SEC);
@@ -4067,6 +4112,10 @@ void loop()
 
   while (Serial2.available()) // Obrada dolaznih bajtova preko Serial2 (RS485)
   {
+    if (otaUpdateInProgress) {
+      break;
+    }
+
     // NE čitaj Serial2 ako HTTP handler trenutno čeka odgovor!
     if (!httpHandlerWaiting) {
       TF_AcceptChar(&tfapp, Serial2.read());

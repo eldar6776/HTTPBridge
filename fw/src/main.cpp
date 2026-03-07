@@ -2445,7 +2445,7 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
     data["pin"] = pin;
     data["duration_seconds"] = pauseSeconds;
     sendJsonSuccess(request, "PIN pulsed", &data);
-    break;
+    return;
   }
   case CMD_TH_SETPOINT:
   {

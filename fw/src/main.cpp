@@ -71,7 +71,7 @@ TF_Result UpdateService_Listener(TinyFrame *tf, TF_Msg *msg);
 
 IRac ac(IR_PIN);
 
-#define WDT_TIMEOUT 5
+#define WDT_TIMEOUT 60  // 60s: pokriva sve legalne blokade u setup() i loop(); portal je jedina iznimka (delete/add)
 #define MAX_PING_FAILURES 10
 #define PING_INTERVAL_MS 60000
 #define READ_INTERVAL 10000 // refresh senora temperature
@@ -2286,7 +2286,7 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
     doc["wifi"]["mdns"] = String(_mdns);
     doc["wifi"]["ip"] = ipStr;
     doc["wifi"]["port"] = _port;
-    
+    doc["wifi"]["rssi"] = WiFi.RSSI();
     // Time info
     doc["time"]["utc"] = String(utcTimeStr);
     doc["time"]["timezone_offset_minutes"] = tzOffsetMinutes;
@@ -3471,6 +3471,7 @@ void tryConnectWiFi()
     unsigned long start = millis();
     while (WiFi.status() != WL_CONNECTED && millis() - start < 10000)
     {
+      esp_task_wdt_reset();
       delay(100);
     }
 
@@ -3490,7 +3491,11 @@ void tryConnectWiFi()
   {
     LOG_INFO_LN("📶 Starting WiFiManager portal...");
 
+    // Portal blokira beskonacno (do configPortalTimeout) - WDT bi okidao.
+    // Deregistrujemo task za vrijeme portala, isti princip kao i za button portal u loop().
+    esp_task_wdt_delete(NULL);
     connected = wm.autoConnect("WiFiManager");
+    esp_task_wdt_add(NULL); // ponovo aktiviraj nadzor po izlasku iz portala
 
     if (connected)
     {
@@ -3515,22 +3520,26 @@ void tryConnectWiFi()
  */
 bool pingGoogle()
 {
-  // koristi `ping` preko `esp_ping` biblioteke ako koristiš ESP32
-  // ili ručno preko `WiFiClient` ako ne koristiš ping biblioteku
   WiFiClient client;
-  return client.connect("8.8.8.8", 53); // DNS port (radi brže nego ICMP ping)
+  esp_task_wdt_reset(); // TCP connect moze blokirati nekoliko sekundi ako mreza ne odgovara
+  return client.connect("8.8.8.8", 53); // DNS port (radi brze nego ICMP ping)
 }
 /**
  * SETUP
  */
 void setup()
 {
-  // esp_task_wdt_init(WDT_TIMEOUT, true); // init watchdog, true = reset na timeout
-  // esp_task_wdt_add(NULL);
+  // WDT: init + add odmah na pocetku - cijeli setup() je pod nadzorom od prve linije.
+  // Svaka operacija koja moze trajati duze od WDT_TIMEOUT mora imati wdt_reset ili delete/add.
+  esp_task_wdt_init(WDT_TIMEOUT, true); // panic=true -> hard reset na timeout
+  esp_task_wdt_add(NULL);              // registruj main task odmah
+  
 
   Serial.begin(115200);
   Serial2.begin(115200);
 
+  LOG_INFO("[WDT] Task watchdog armed at setup() start. Timeout: %ds\n", WDT_TIMEOUT);
+  
   // Inicijalizacija RTC Persistent Pinova (PRIORITETNO)
   pinMode(LIGHT_PIN, OUTPUT);
   pinMode(FAN_L, OUTPUT);
@@ -3662,10 +3671,11 @@ void setup()
   }
 
   configTzTime(TIMEZONE, "pool.ntp.org");
-  // Čekaj da se vreme sinhronizuje
+  // Cekaj da se vreme sinhronizuje
   unsigned long start = millis();
   while (time(nullptr) < 100000 && millis() - start < 10000)
   {
+    esp_task_wdt_reset();
     LOG_INFO(".");
     delay(500);
   }
@@ -4130,17 +4140,22 @@ void loop()
     buttonPressStart = millis();
     while (digitalRead(BOOT_PIN) == LOW)
     {
-      // čekaj dok je dugme i dalje pritisnuto
+      esp_task_wdt_reset(); // hrani WDT za vrijeme cekanja na drzanje dugmeta
       if (millis() - buttonPressStart >= HOLD_TIME)
       {
         LOG_INFO_LN("BOOT taster hold for 5s, starting portal...");
-        wm.resetSettings();    // obriši stare podatke
+        // Portal blokira loop() beskonacno dok korisnik ne podesi WiFi.
+        // Deregistrujemo task da WDT ne resetuje uredjaj za vrijeme namjernog cekanja.
+        esp_task_wdt_delete(NULL);
+        wm.resetSettings();    // obrisi stare podatke
         WiFi.disconnect(true); // prekini vezu i zaboravi sve
         delay(1000);
         wm.startConfigPortal("WiFiManager");
+        esp_task_wdt_add(NULL); // ponovo aktiviraj nadzor po izlasku iz portala
+        LOG_INFO("[WDT] Task watchdog re-armed after portal. Timeout: %ds\n", WDT_TIMEOUT);
         break;
       }
-      delay(10); // mali delay da CPU ne troši bez veze
+      delay(10); // mali delay da CPU ne trosi bez veze
     }
   }
 

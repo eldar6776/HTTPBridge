@@ -52,7 +52,8 @@ odgovor: 	{
 					"fan": "OFF",
 					"ema_alpha": 0.2,
 					"fluid_temp": -999,
-					"fluid_available": false
+					"fluid_available": false,
+					"fancoil_floor_mode": false
 					},
 					"sos": {
 					"active": false
@@ -1107,6 +1108,51 @@ odgovor: 	{
 			  "message": "EMA filter updated",
 			  "data": {
 			    "ema_alpha": 0.5
+			  }
+			}
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	TH_FLOOR_ON
+
+opis:		aktiviraj režim podnog grijanja na ESP modulu. kada je ovaj flag
+			aktivan i termostat radi u modu grijanja, relej prve brzine 
+			ventilatora (FAN_L, D25) se NE aktivira. umjesto toga, ventil
+			fancoila (D33) se aktivira kao i inače čim postoji uslov za 
+			paljenje (temperatura < setpoint - diferenca), čime podno 
+			grijanje preuzima ulogu prve brzine. ostale brzine ventilatora
+			(srednja i visoka) rade bez promjene. u modu hlađenja flag nema
+			nikakav efekat — 1. brzina ventilatora radi normalno. postavka
+			se čuva u trajnoj memoriji i ostaje aktivna nakon restarta uređaja.
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=TH_FLOOR_ON
+
+odgovor: 	{
+			  "status": "success",
+			  "message": "Fancoil floor heating mode enabled",
+			  "data": {
+			    "fancoil_floor_mode": true
+			  }
+			}
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+komanda:	TH_FLOOR_OFF
+
+opis:		deaktiviraj režim podnog grijanja na ESP modulu. vraća normalno
+			ponašanje termostata: pri uslovu prve brzine u modu grijanja
+			aktivira se i relej FAN_L (D25) uz ventil (D33). postavka se 
+			čuva u trajnoj memoriji i ostaje aktivna nakon restarta uređaja.
+
+primjer: 	http://soba501.local:8020/sysctrl.cgi?CMD=TH_FLOOR_OFF
+
+odgovor: 	{
+			  "status": "success",
+			  "message": "Fancoil floor heating mode disabled",
+			  "data": {
+			    "fancoil_floor_mode": false
 			  }
 			}
 ----------------------------------------------------------------------

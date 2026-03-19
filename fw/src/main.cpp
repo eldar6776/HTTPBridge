@@ -245,6 +245,7 @@ enum LedState
 
 ThMode th_mode = TH_OFF;
 ThMode th_saved_mode = TH_COOLING; // defaultni režim koji se pamti prije OFF
+bool th_fancoil_floor_mode = false; // Podno grijanje: blokira FAN_L (brzina 1) u modu grijanja
 LedState led_state = LED_SLOW;
 Ticker lightTicker;
 OneWire oneWire(ONE_WIRE_PIN);
@@ -356,6 +357,8 @@ enum CommandType
   CMD_TH_ON = 0x67,
   CMD_TH_EMA = 0x68,
   CMD_SOS_RESET = 0x69,  // Resetuje SOS status nakon što je hitnost riješena
+  CMD_TH_FLOOR_ON = 0x6A,  // Aktiviraj floor heating mode (blokira FAN_L u modu grijanja)
+  CMD_TH_FLOOR_OFF = 0x6B, // Deaktiviraj floor heating mode
   CMD_SET_IR_PROTOCOL = 0x70, // Set IR Protocol ID
   CMD_GET_IR_PROTOCOL = 0x71, // Get IR Protocol ID
   CMD_SET_IR = 0x72           // Send basic IR command (ON/OFF, Mode, Temp)
@@ -466,6 +469,10 @@ CommandType stringToCommand(const String &cmd)
     return CMD_TH_ON;
   if (cmd == "TH_EMA")
     return CMD_TH_EMA;
+  if (cmd == "TH_FLOOR_ON")
+    return CMD_TH_FLOOR_ON;
+  if (cmd == "TH_FLOOR_OFF")
+    return CMD_TH_FLOOR_OFF;
   if (cmd == "SET_LANG")
     return CMD_SET_LANG;
   if (cmd == "GET_SYSID")
@@ -791,7 +798,11 @@ void setThermoFanLevel(int newLevel)
   switch (newLevel)
   {
   case 1:
-    setPinWithHold(FAN_L, HIGH);
+    // U floor heating modu (podno grijanje) ne aktiviraj FAN_L u modu grijanja;
+    // VALVE se aktivira putem currentFanLevel > 0, što je dovoljno za podno grijanje
+    if (!(th_fancoil_floor_mode && th_mode == TH_HEATING)) {
+      setPinWithHold(FAN_L, HIGH);
+    }
     break;
   case 2:
     setPinWithHold(FAN_M, HIGH);
@@ -931,6 +942,7 @@ void loadThermoPreferences()
   th_treshold = preferences.getFloat("treshold", 0.5);
   th_mode = (ThMode)preferences.getInt("mode", 0);
   th_saved_mode = (ThMode)preferences.getInt("th_saved_mode", 0);
+  th_fancoil_floor_mode = preferences.getBool("fancoil_floor", false);
   emaAlpha = preferences.getFloat("emaAlpha", 0.2);
   emaTemperature = th_setpoint; // fallback prije prvog validnog očitanja
   emaInitialized = false;
@@ -2322,6 +2334,7 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
     doc["thermostat"]["ema_alpha"] = emaAlpha;
     doc["thermostat"]["fluid_temp"] = tempSensor2Available ? fluid : -999;
     doc["thermostat"]["fluid_available"] = tempSensor2Available;
+    doc["thermostat"]["fancoil_floor_mode"] = th_fancoil_floor_mode;
     
     // SOS Status
     if (sosStatus) {
@@ -2629,6 +2642,36 @@ void handleSysctrlRequest(AsyncWebServerRequest *request)
     JsonDocument data;
     data["ema_alpha"] = emaAlpha;
     sendJsonSuccess(request, "EMA filter updated", &data);
+    return;
+  }
+  case CMD_TH_FLOOR_ON:
+  {
+    th_fancoil_floor_mode = true;
+    preferences.begin("thermo", false);
+    preferences.putBool("fancoil_floor", true);
+    preferences.end();
+    // Ako je trenutno na brzini 1 u grijanju, isključi FAN_L fizički
+    if (th_mode == TH_HEATING && currentFanLevel == 1) {
+      setPinWithHold(FAN_L, LOW);
+    }
+    JsonDocument fancoilOnDoc;
+    fancoilOnDoc["fancoil_floor_mode"] = true;
+    sendJsonSuccess(request, "Fancoil floor heating mode enabled", &fancoilOnDoc);
+    return;
+  }
+  case CMD_TH_FLOOR_OFF:
+  {
+    th_fancoil_floor_mode = false;
+    preferences.begin("thermo", false);
+    preferences.putBool("fancoil_floor", false);
+    preferences.end();
+    // Ako je trenutno na brzini 1 u grijanju, aktiviraj FAN_L fizički
+    if (th_mode == TH_HEATING && currentFanLevel == 1) {
+      setPinWithHold(FAN_L, HIGH);
+    }
+    JsonDocument fancoilOffDoc;
+    fancoilOffDoc["fancoil_floor_mode"] = false;
+    sendJsonSuccess(request, "Fancoil floor heating mode disabled", &fancoilOffDoc);
     return;
   }
   case CMD_SOS_RESET:
